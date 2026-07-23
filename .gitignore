@@ -1,0 +1,43 @@
+# --- Python Cache ---
+__pycache__/
+*.pyc
+
+# --- Local Agent / Tool Directories ---
+.agents/
+.claude/
+
+# --- Environment & Secret Files (if you ever add any) ---
+.env
+*.env
+
+# --- Virtual Environments (if you create one) ---
+venv/
+.venv/
+env/
+
+# --- IDE Settings ---
+.vscode/
+.idea/
+
+#python files
+main_system_approved.py
+engaz.py
+
+#all md files
+ux_instructions.md
+simplified_specification.md
+project_specification.md
+PLAN.md
+lawyer_booking_system_spec.md
+calendar_layout_prompt.md
+
+# json  files
+skills-lock.json
+# --- Ignore Docker files ---
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# --- Experimental Folders ---
+some experiments(SEC)/
+Scripts/
