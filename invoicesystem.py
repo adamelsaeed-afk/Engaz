@@ -135,12 +135,48 @@ class DataRepository:
     def _init_storage(self):
         if os.path.exists(self._filepath):
             self._load()
+            self._migrate()
         else:
             self._seed_and_save()
 
     def _load(self):
         with open(self._filepath, "r", encoding="utf-8") as f:
             self._data = json.load(f)
+
+    def _migrate(self):
+        changed = False
+        for key in ("case_files", "law_books", "book_comments", "book_chats"):
+            if key not in self._data:
+                self._data[key] = []
+                changed = True
+        stakeholder = next(
+            (u for u in self._data.get("users", []) if u.get("role") == "stakeholder"),
+            None,
+        )
+        if stakeholder is None:
+            self._data.setdefault("users", []).append({
+                "user_id": "user_8",
+                "username": "ahmad.al-rashid",
+                "password": "stakeholder123",
+                "role": "stakeholder",
+                "first_name": "Ahmad",
+                "last_name": "Al-Rashid",
+                "email": "ahmad@engaz.com",
+                "phone": "0501234567",
+                "dashboard_preferences": {
+                    "visible_metrics": ["closing_rate", "revenue", "cases_by_status",
+                                         "cases_by_department", "top_lawyers_closing",
+                                         "top_lawyers_revenue", "workload",
+                                         "appointments", "client_trends"],
+                    "layout_order": ["closing_rate", "revenue", "cases_by_status",
+                                     "cases_by_department", "top_lawyers_closing",
+                                     "top_lawyers_revenue", "workload",
+                                     "appointments", "client_trends"],
+                },
+            })
+            changed = True
+        if changed:
+            self._save()
 
     def _save(self):
         with open(self._filepath, "w", encoding="utf-8") as f:

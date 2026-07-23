@@ -73,6 +73,40 @@
       "last_name": "Wong",
       "email": "lisa@email.com",
       "phone": "555-0204"
+    },
+    {
+      "user_id": "user_8",
+      "username": "ahmad.al-rashid",
+      "password": "stakeholder123",
+      "role": "stakeholder",
+      "first_name": "Ahmad",
+      "last_name": "Al-Rashid",
+      "email": "ahmad@engaz.com",
+      "phone": "0501234567",
+      "dashboard_preferences": {
+        "visible_metrics": [
+          "closing_rate",
+          "revenue",
+          "cases_by_status",
+          "cases_by_department",
+          "top_lawyers_closing",
+          "top_lawyers_revenue",
+          "workload",
+          "appointments",
+          "client_trends"
+        ],
+        "layout_order": [
+          "closing_rate",
+          "revenue",
+          "cases_by_status",
+          "cases_by_department",
+          "top_lawyers_closing",
+          "top_lawyers_revenue",
+          "workload",
+          "appointments",
+          "client_trends"
+        ]
+      }
     }
   ],
   "cases": [
@@ -167,7 +201,7 @@
       "date": "2026-07-21",
       "start_time": "10:00",
       "duration_minutes": 60,
-      "status": "Approved",
+      "status": "Declined",
       "notes": "First meeting."
     },
     {
@@ -705,6 +739,16 @@
       "reference_id": "msg_1",
       "is_read": true,
       "created_at": "2026-07-23T21:08:40.783465"
+    },
+    {
+      "notification_id": "notification_33",
+      "user_id": "user_4",
+      "title": "Appointment Declined",
+      "message": "Your appointment 'kkkkkkk' on 2026-07-31 has been declined.",
+      "notification_type": "appointment_declined",
+      "reference_id": "app_1",
+      "is_read": false,
+      "created_at": "2026-07-24T02:01:17.704946"
     }
   ],
   "case_files": [

@@ -1,5 +1,7 @@
 import csv
 import io
+import os
+import tempfile
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -12,10 +14,18 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QComboBox, QFileDialog, QCheckBox,
-    QGraphicsDropShadowEffect, QGridLayout, QSizePolicy,
+    QGraphicsDropShadowEffect, QGridLayout, QSizePolicy, QDialog,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
+
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib import colors as rl_colors
+from reportlab.lib.units import inch
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle,
+)
+from reportlab.lib.styles import getSampleStyleSheet
 
 NAVY = "#1B3A5C"
 STEEL = "#4A7FB5"
@@ -78,6 +88,7 @@ def _chart_canvas(fig):
 class _MetricWidget(QFrame):
     move_up = Signal(str)
     move_down = Signal(str)
+    expand_requested = Signal(str)
 
     def __init__(self, metric_id, title, parent=None):
         super().__init__(parent)
@@ -123,6 +134,17 @@ class _MetricWidget(QFrame):
             if item.widget():
                 item.widget().deleteLater()
         if widget:
+            widget.setCursor(Qt.PointingHandCursor)
+            widget.setToolTip("Click to expand")
+            mid = self.metric_id
+            orig = widget.mouseReleaseEvent
+
+            def on_click(e):
+                self.expand_requested.emit(mid)
+                if orig:
+                    return orig(e)
+
+            widget.mouseReleaseEvent = on_click
             self._content.addWidget(widget)
 
 
@@ -135,6 +157,7 @@ class StakeholderDashboardPage(QWidget):
         self._visible = list(ALL_METRIC_IDS)
         self._layout_order = list(ALL_METRIC_IDS)
         self._widgets = {}
+        self._chart_figures = {}
         self._build()
         self.refresh()
 
@@ -205,11 +228,11 @@ class StakeholderDashboardPage(QWidget):
         gear_btn.clicked.connect(self._toggle_settings)
         bl.addWidget(gear_btn)
 
-        csv_btn = QPushButton("Export CSV")
-        csv_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
+        pdf_btn = QPushButton("Export PDF")
+        pdf_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
                               f" border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: bold; }}")
-        csv_btn.clicked.connect(self._export_csv)
-        bl.addWidget(csv_btn)
+        pdf_btn.clicked.connect(self._export_pdf)
+        bl.addWidget(pdf_btn)
 
         outer.addWidget(bar)
 
@@ -348,10 +371,42 @@ class StakeholderDashboardPage(QWidget):
         if fn:
             widget = _MetricWidget(mid, METRIC_LABELS[mid])
             fig = fn(data)
+            self._chart_figures[mid] = fig
             canvas = _chart_canvas(fig)
             widget.set_content(canvas)
+            widget.expand_requested.connect(lambda m=mid: self._expand_metric(m))
             return widget
         return None
+
+    def _expand_metric(self, mid):
+        data = self._compute_data()
+        fn = {
+            "closing_rate": self._render_closing_rate,
+            "revenue": self._render_revenue,
+            "cases_by_status": self._render_cases_by_status,
+            "cases_by_department": self._render_cases_by_department,
+            "top_lawyers_closing": self._render_top_lawyers_closing,
+            "top_lawyers_revenue": self._render_top_lawyers_revenue,
+            "workload": self._render_workload,
+            "appointments": self._render_appointments,
+            "client_trends": self._render_client_trends,
+        }.get(mid)
+        if fn is None:
+            return
+        fig = fn(data)
+        dlg = QDialog(self)
+        dlg.setWindowTitle(METRIC_LABELS.get(mid, mid))
+        dlg.resize(960, 640)
+        dlg.setMinimumSize(700, 480)
+        dlg.setStyleSheet(f"background: {WHITE};")
+        dlg_layout = QVBoxLayout(dlg)
+        dlg_layout.setContentsMargins(8, 8, 8, 8)
+        big_canvas = FigureCanvasQTAgg(fig)
+        big_canvas.setFocusPolicy(Qt.NoFocus)
+        big_canvas.wheelEvent = lambda e: e.ignore()
+        big_canvas.setStyleSheet(f"border: 1px solid {BORDER}; border-radius: 6px; background: {WHITE};")
+        dlg_layout.addWidget(big_canvas, stretch=1)
+        dlg.exec()
 
     def _render_closing_rate(self, data):
         cases = data["cases"]
@@ -580,27 +635,68 @@ class StakeholderDashboardPage(QWidget):
         fig.tight_layout()
         return fig
 
-    def _export_csv(self):
+    def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Dashboard CSV", "dashboard.csv", "CSV Files (*.csv)"
+            self, "Export Dashboard PDF", "dashboard.pdf", "PDF Files (*.pdf)"
         )
         if not path:
             return
         data = self._compute_data()
         cases = data["cases"]
         invoices = data["invoices"]
-        output = io.StringIO()
-        writer = csv.writer(output)
-
         closed = sum(1 for c in cases if c.get("status") == "Closed")
         rate = f"{(closed / len(cases) * 100):.1f}%" if cases else "0%"
         paid = sum(inv["amount"] for inv in invoices if inv.get("status") == "Paid")
 
-        writer.writerow(["Metric", "Value"])
-        writer.writerow(["Closing Rate", rate])
-        writer.writerow(["Total Revenue (Paid)", f"${paid:,.0f}"])
-        writer.writerow(["Total Cases", len(cases)])
-        writer.writerow(["Total Appointments", len(data["appointments"])])
+        doc = SimpleDocTemplate(path, pagesize=A4,
+                                leftMargin=36, rightMargin=36,
+                                topMargin=36, bottomMargin=36)
+        styles = getSampleStyleSheet()
+        elements = []
 
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            f.write(output.getvalue())
+        elements.append(Paragraph("Engaz — Stakeholder Dashboard", styles["Title"]))
+        elements.append(Spacer(1, 8))
+        elements.append(Paragraph(f"Scope: {self._scope}", styles["Normal"]))
+        elements.append(Spacer(1, 12))
+
+        stat_data = [
+            ["Metric", "Value"],
+            ["Closing Rate", rate],
+            ["Total Revenue (Paid)", f"${paid:,.0f}"],
+            ["Total Cases", str(len(cases))],
+            ["Total Appointments", str(len(data["appointments"]))],
+        ]
+        table = Table(stat_data, colWidths=[3 * inch, 2 * inch])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor(NAVY)),
+            ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("GRID", (0, 0), (-1, -1), 0.5, rl_colors.HexColor(BORDER)),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 16))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for mid in self._layout_order:
+                if mid not in self._visible:
+                    continue
+                fig = self._chart_figures.get(mid)
+                if fig is None:
+                    continue
+                png_path = os.path.join(tmpdir, f"{mid}.png")
+                fig.savefig(png_path, dpi=120, bbox_inches="tight",
+                           facecolor=WHITE, edgecolor="none")
+                label = METRIC_LABELS.get(mid, mid)
+                elements.append(Paragraph(label, styles["Heading3"]))
+                elements.append(Image(png_path, width=6.5 * inch, height=2.8 * inch))
+                elements.append(Spacer(1, 10))
+            elements.append(Spacer(1, 8))
+            elements.append(Paragraph(
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                styles["Italic"],
+            ))
+            doc.build(elements)
