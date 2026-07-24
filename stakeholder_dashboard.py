@@ -27,16 +27,10 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet
 
-NAVY = "#1B3A5C"
-STEEL = "#4A7FB5"
-WHITE = "#FFFFFF"
-CARD_BG = "#F8F9FB"
-TEXT_DARK = "#1A1A2E"
-TEXT_GRAY = "#6B7280"
-GREEN = "#059669"
-AMBER = "#D97706"
-RED = "#DC2626"
-BORDER = "#E5E7EB"
+from engaz_constants import (
+    NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
+    GREEN, AMBER, RED, BORDER, clear_layout,
+)
 
 sns.set_theme(style="whitegrid")
 
@@ -175,10 +169,14 @@ class StakeholderDashboardPage(QWidget):
         settings_layout.setContentsMargins(16, 8, 16, 8)
         settings_layout.setSpacing(4)
         settings_layout.addWidget(QLabel("Toggle Metrics:"))
+        settings_layout.itemAt(settings_layout.count() - 1).widget().setStyleSheet(
+            f"font-size: 13px; font-weight: bold; color: {TEXT_DARK}; border: none;"
+        )
         self._checkboxes = {}
         cb_grid = QGridLayout()
         for i, mid in enumerate(ALL_METRIC_IDS):
             cb = QCheckBox(METRIC_LABELS[mid])
+            cb.setStyleSheet(f"font-size: 12px; color: {TEXT_DARK};")
             cb.setChecked(True)
             cb.toggled.connect(lambda checked, m=mid: self._on_metric_toggled(m, checked))
             self._checkboxes[mid] = cb
@@ -283,11 +281,11 @@ class StakeholderDashboardPage(QWidget):
 
     def refresh(self):
         self._load_preferences()
-        while self._content_layout.count():
-            item = self._content_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        for fig in self._chart_figures.values():
+            plt.close(fig)
+        self._chart_figures.clear()
         self._widgets.clear()
+        clear_layout(self._content_layout)
 
         data = self._compute_data()
         for mid in self._layout_order:
@@ -407,6 +405,7 @@ class StakeholderDashboardPage(QWidget):
         big_canvas.setStyleSheet(f"border: 1px solid {BORDER}; border-radius: 6px; background: {WHITE};")
         dlg_layout.addWidget(big_canvas, stretch=1)
         dlg.exec()
+        plt.close(fig)
 
     def _render_closing_rate(self, data):
         cases = data["cases"]

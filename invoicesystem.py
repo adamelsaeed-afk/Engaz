@@ -14,74 +14,24 @@ from PySide6.QtWidgets import (
     QHeaderView, QAbstractItemView, QDialog, QDialogButtonBox, QTextEdit,
     QStylePainter, QStyleOptionComboBox, QStyle, QDateEdit, QCheckBox,
 )
-from PySide6.QtCore import Qt, Signal, QPoint, QDate, QDate
+from PySide6.QtCore import Qt, Signal, QPoint, QDate
 from PySide6.QtGui import QColor, QPalette, QPainter
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
+from engaz_constants import (
+    NAVY, STEEL, WHITE, LIGHT_GRAY, CARD_BG, TEXT_DARK, TEXT_GRAY,
+    GREEN, AMBER, RED, BORDER,
+    PAGE_DASHBOARD, PAGE_CASES, PAGE_CALENDAR, PAGE_INVOICES,
+    PAGE_MESSAGES, PAGE_REPORTS, PAGE_LAW_LIBRARY, PAGE_STAKEHOLDER_DASHBOARD,
+    NOTIFICATION_PAGE, _status_badge, clear_layout,
+)
+
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engaz_data.json")
-
-# ── standard Colors ──────────────────────────────────────────────────────────────
-NAVY = "#1B3A5C"
-STEEL = "#4A7FB5"
-WHITE = "#FFFFFF"
-LIGHT_GRAY = "#FFFFFF"
-CARD_BG = "#FFFFFF"
-TEXT_DARK = "#1A1A2E"
-TEXT_GRAY = "#6B7280"
-GREEN = "#059669"
-AMBER = "#D97706"
-RED = "#DC2626"
-BORDER = "#E5E7EB"
-
-# ── Page indices (for sidebar and notification navigation) ──────────────
-PAGE_DASHBOARD = 0
-PAGE_CASES = 1
-PAGE_CALENDAR = 2
-PAGE_INVOICES = 3
-PAGE_MESSAGES = 4
-PAGE_REPORTS = 5
-PAGE_LAW_LIBRARY = 6
-PAGE_STAKEHOLDER_DASHBOARD = 7
-
-NOTIFICATION_PAGE = {
-    "appointment_requested": PAGE_CALENDAR,
-    "appointment_approved": PAGE_CALENDAR,
-    "appointment_declined": PAGE_CALENDAR,
-    "appointment_completed": PAGE_CALENDAR,
-    "invoice_created": PAGE_INVOICES,
-    "invoice_paid": PAGE_INVOICES,
-    "message_received": PAGE_MESSAGES,
-    "case_created": PAGE_CASES,
-}
 
 
 def _minutes_since_midnight(time_str):
     parts = time_str.split(":")
     return int(parts[0]) * 60 + int(parts[1])
-
-
-def _status_badge(status_text):
-    colors = {
-        "Open": (STEEL, WHITE),
-        "In Progress": (AMBER, WHITE),
-        "Closed": (TEXT_GRAY, WHITE),
-        "Approved": (GREEN, WHITE),
-        "Requested": (AMBER, WHITE),
-        "Declined": (RED, WHITE),
-        "Completed": (STEEL, WHITE),
-        "Cancelled": (TEXT_GRAY, WHITE),
-        "Pending": (AMBER, WHITE),
-        "Paid": (GREEN, WHITE),
-        "Overdue": (RED, WHITE),
-    }
-    bg, fg = colors.get(status_text, (TEXT_GRAY, WHITE))
-    lbl = QLabel(status_text)
-    lbl.setAlignment(Qt.AlignCenter)
-    lbl.setStyleSheet(
-        f"background: {bg}; color: {fg}; padding: 2px 10px; "
-        f"border-radius: 10px; font-size: 11px; font-weight: bold;"
-    )
-    return lbl
 
 
 class ArrowComboBox(QComboBox):
@@ -175,12 +125,89 @@ class DataRepository:
                 },
             })
             changed = True
+        if self._deduplicate_ids():
+            changed = True
         if changed:
             self._save()
 
+    def _deduplicate_ids(self):
+        changed = False
+        prefix_map = {
+            "appointments": "app",
+            "invoices": "inv",
+            "messages": "msg",
+            "book_comments": "bcomment",
+            "notifications": "notification",
+            "cases": "case",
+            "case_files": "file",
+            "law_books": "book",
+            "book_chats": "bchat",
+        }
+        notif_type_map = {
+            "appointments": [
+                "appointment_requested", "appointment_approved", "appointment_declined",
+                "appointment_completed", "appointment_cancelled",
+            ],
+            "invoices": ["invoice_created", "invoice_paid"],
+            "messages": ["message_received"],
+        }
+        for collection_key in list(self._data.keys()):
+            if collection_key.startswith("_") or collection_key == "users":
+                continue
+            items = self._data[collection_key]
+            if not items or not isinstance(items, list):
+                continue
+            id_candidates = [k for k in items[0].keys() if k.endswith("_id")]
+            if not id_candidates:
+                continue
+            id_field = id_candidates[0]
+            prefix = prefix_map.get(collection_key)
+            if not prefix:
+                continue
+            seen = {}
+            duplicates = []
+            for item in items:
+                id_val = item[id_field]
+                if id_val in seen:
+                    duplicates.append(item)
+                else:
+                    seen[id_val] = item
+            if not duplicates:
+                continue
+            for dup_item in duplicates:
+                old_id = dup_item[id_field]
+                new_id = self._next_id(collection_key, prefix)
+                dup_item[id_field] = new_id
+                changed = True
+            if changed and collection_key in notif_type_map:
+                allowed_types = notif_type_map[collection_key]
+                for notif in self._data.get("notifications", []):
+                    if notif.get("notification_type") not in allowed_types:
+                        continue
+        return changed
+
     def _save(self):
+        self._validate_no_duplicate_ids()
         with open(self._filepath, "w", encoding="utf-8") as f:
             json.dump(self._data, f, indent=2, ensure_ascii=False)
+
+    def _validate_no_duplicate_ids(self):
+        for collection_key, items in self._data.items():
+            if collection_key.startswith("_") or not isinstance(items, list) or not items:
+                continue
+            id_candidates = [k for k in items[0].keys() if k.endswith("_id")]
+            if not id_candidates:
+                continue
+            id_field = id_candidates[0]
+            seen = set()
+            for item in items:
+                id_val = item.get(id_field)
+                if id_val in seen:
+                    raise RuntimeError(
+                        f"Duplicate {id_field}='{id_val}' detected in '{collection_key}' "
+                        f"during save — data integrity violation"
+                    )
+                seen.add(id_val)
 
     def _seed_and_save(self):
         """builds seed data and saves it in the JSON file, when the file doesn't exist"""
@@ -195,13 +222,27 @@ class DataRepository:
     # ── Id generators ────────────────────────────────────────────────────
 
     def _next_id(self, collection_key, prefix):
+        items = self._data.get(collection_key, [])
+        id_field = None
+        if items:
+            for k in items[0].keys():
+                if k.endswith("_id"):
+                    id_field = k
+                    break
+        if not id_field:
+            id_field = f"{prefix}_id"
         highest = 0
-        for item in self._data.get(collection_key, []):
-            cid = item.get(f"{prefix}_id", "")
+        for item in items:
+            cid = item.get(id_field, "")
             tail = cid.removeprefix(f"{prefix}_")
             if tail.isdigit():
                 highest = max(highest, int(tail))
-        return f"{prefix}_{highest + 1}"
+        candidate_num = highest + 1
+        while True:
+            candidate = f"{prefix}_{candidate_num}"
+            if not any(item.get(id_field) == candidate for item in items):
+                return candidate
+            candidate_num += 1
 
     # ── User methods for credentials─────────────────────────────────────────────────────
 
@@ -283,6 +324,21 @@ class DataRepository:
                 self._save()
                 return True
         return False
+
+    def delete_case_with_cascade(self, case_id):
+        for coll in ("appointments", "invoices", "messages", "case_files"):
+            for item in self._data.get(coll, []):
+                if item.get("case_id") == case_id:
+                    item["case_id"] = ""
+        found = False
+        for i, c in enumerate(self._data["cases"]):
+            if c["case_id"] == case_id:
+                del self._data["cases"][i]
+                found = True
+                break
+        if found:
+            self._save()
+        return found
 
     def count_active_cases_for_lawyer(self, lawyer_id):
         return sum(
@@ -647,6 +703,8 @@ class DataRepository:
         return dict(entry)
 
     def delete_law_book(self, book_id):
+        for coll in ("book_comments", "book_chats"):
+            self._data[coll] = [item for item in self._data.get(coll, []) if item.get("book_id") != book_id]
         for i, b in enumerate(self._data.get("law_books", [])):
             if b["book_id"] == book_id:
                 del self._data["law_books"][i]
@@ -1101,16 +1159,18 @@ class Sidebar(QFrame):
         self._buttons.append(btn)
         return btn
 
-    def _btn_style(self, active):
+    def _btn_style(self, active, collapsed=False):
+        align = "center" if collapsed else "left"
+        pad = "0px" if collapsed else "14px"
         if active:
             return f"""
                 QPushButton {{ background: {STEEL}; color: {WHITE}; border: none;
-                               text-align: left; padding-left: 14px; font-size: 13px; border-radius: 0px;
+                               text-align: {align}; padding-left: {pad}; font-size: 13px; border-radius: 0px;
                                border-left: 3px solid {WHITE}; }}
             """
         return f"""
             QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;
-                           text-align: left; padding-left: 14px; font-size: 13px; border-radius: 0px; }}
+                           text-align: {align}; padding-left: {pad}; font-size: 13px; border-radius: 0px; }}
             QPushButton:hover {{ background: rgba(255, 255, 255, 0.1); }}
         """
 
@@ -1119,12 +1179,9 @@ class Sidebar(QFrame):
         self.setFixedWidth(self._expanded_width if self._expanded else self._collapsed_width)
         for i, btn in enumerate(self._buttons):
             if not self._expanded:
-                icon = self._icon_texts[i][0]
-                btn.setText(icon)
-                btn.setStyleSheet(btn.styleSheet().replace("text-align: left;", "text-align: center;").replace("padding-left: 14px;", "padding-left: 0px;"))
+                btn.setText(self._icon_texts[i][0])
             else:
-                full = self._icon_texts[i][1]
-                btn.setText(full)
+                btn.setText(self._icon_texts[i][1])
         self._update_button_styles()
 
     def _select_page(self, page, index):
@@ -1134,7 +1191,7 @@ class Sidebar(QFrame):
 
     def _update_button_styles(self):
         for i, btn in enumerate(self._buttons):
-            btn.setStyleSheet(self._btn_style(active=(i == self._active_index)))
+            btn.setStyleSheet(self._btn_style(active=(i == self._active_index), collapsed=not self._expanded))
 
     def _confirm_reset(self):
         answer = QMessageBox.warning(
@@ -1210,7 +1267,7 @@ class NotificationDropdown(QFrame):
         header_layout.addStretch()
         mark_all = QLabel("Mark all as read")
         mark_all.setCursor(Qt.PointingHandCursor)
-        mark_all.setStyleSheet(f"color: {STEEL}; font-size: 11px; border: none; text-decoration: underline;")
+        mark_all.setStyleSheet(f"color: {NAVY}; font-size: 11px; border: none; text-decoration: underline;")
         mark_all.mousePressEvent = lambda e: self._mark_all_read()
         header_layout.addWidget(mark_all)
         root.addWidget(header_row)
@@ -1227,10 +1284,7 @@ class NotificationDropdown(QFrame):
         root.addWidget(scroll)
 
     def refresh(self):
-        while self._list_layout.count():
-            item = self._list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._list_layout)
         items = self._repo.notifications_for_user(self._user_id)
         if not items:
             empty = QLabel("  No notifications")
@@ -1412,10 +1466,7 @@ class DashboardPage(QWidget):
             self._refresh_appointments_section()
 
     def _refresh_appointments_section(self):
-        while self._appointments_layout.count():
-            item = self._appointments_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._appointments_layout)
         uid = self._user["user_id"]
         if self._user["role"] == "lawyer":
             appts = self._repo.upcoming_appointments_for_lawyer(uid)
@@ -1768,7 +1819,7 @@ class CaseForm(QDialog):
             QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
-            self._repo.delete_case(self._case["case_id"])
+            self._repo.delete_case_with_cascade(self._case["case_id"])
             self._case_deleted = True
             self.accept()
 
@@ -1934,6 +1985,30 @@ class Casepagemain(QWidget):
         """)
         layout.addWidget(self._table)
 
+        if not self._is_lawyer:
+            self._empty_state = QFrame()
+            self._empty_state.setStyleSheet(
+                f"background: {CARD_BG}; border: 1px solid {BORDER}; border-radius: 8px;"
+            )
+            empty_layout = QVBoxLayout(self._empty_state)
+            empty_layout.setAlignment(Qt.AlignCenter)
+            empty_layout.setContentsMargins(24, 40, 24, 40)
+            empty_layout.setSpacing(6)
+            empty_title = QLabel("No cases yet")
+            empty_title.setAlignment(Qt.AlignCenter)
+            empty_title.setStyleSheet(
+                f"font-size: 16px; font-weight: bold; color: {TEXT_DARK}; border: none; background: transparent;"
+            )
+            empty_layout.addWidget(empty_title)
+            empty_sub = QLabel("Your lawyer will create cases for you.")
+            empty_sub.setAlignment(Qt.AlignCenter)
+            empty_sub.setStyleSheet(
+                f"font-size: 13px; color: {TEXT_GRAY}; border: none; background: transparent;"
+            )
+            empty_layout.addWidget(empty_sub)
+            layout.addWidget(self._empty_state)
+            self._empty_state.setVisible(False)
+
     def _load_table(self):
         cases = self._filtered_cases()
         self._table.setRowCount(len(cases))
@@ -1947,6 +2022,13 @@ class Casepagemain(QWidget):
             person_name = f"{person['first_name']} {person['last_name']}" if person else "—"
             self._table.setItem(row, 4, QTableWidgetItem(person_name))
             self._table.setItem(row, 5, QTableWidgetItem(case["created_at"][:10]))
+        self._update_empty_state()
+
+    def _update_empty_state(self):
+        if not self._is_lawyer:
+            has_cases = self._table.rowCount() > 0
+            self._table.setVisible(has_cases)
+            self._empty_state.setVisible(not has_cases)
 
     def _filtered_cases(self):
         cases = (self._repo.get_cases_for_lawyer(self._user["user_id"])
@@ -2095,7 +2177,7 @@ class MonthCalendar(QFrame):
         self._render()
 
     def _build(self):
-        self.setStyleSheet(f"background: transparent;")
+        self.setStyleSheet(f"background: {WHITE};")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -2105,19 +2187,28 @@ class MonthCalendar(QFrame):
         prev = QPushButton("◀")
         prev.setFixedSize(32, 28)
         prev.setCursor(Qt.PointingHandCursor)
-        prev.setStyleSheet(f"background: transparent; color: {NAVY}; border: none; font-size: 14px;")
+        prev.setStyleSheet(
+            f"background: {WHITE}; color: {NAVY}; border: 1px solid {BORDER};"
+            f" border-radius: 4px; font-size: 14px;"
+        )
         prev.clicked.connect(self._prev_month)
         nav.addWidget(prev)
 
         self._title = QLabel()
         self._title.setAlignment(Qt.AlignCenter)
-        self._title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_DARK}; border: none;")
+        self._title.setStyleSheet(
+            f"font-size: 15px; font-weight: bold; color: {NAVY};"
+            f" background: {WHITE}; border: none; padding: 4px 0;"
+        )
         nav.addWidget(self._title, stretch=1)
 
         nxt = QPushButton("▶")
         nxt.setFixedSize(32, 28)
         nxt.setCursor(Qt.PointingHandCursor)
-        nxt.setStyleSheet(f"background: transparent; color: {NAVY}; border: none; font-size: 14px;")
+        nxt.setStyleSheet(
+            f"background: {WHITE}; color: {NAVY}; border: 1px solid {BORDER};"
+            f" border-radius: 4px; font-size: 14px;"
+        )
         nxt.clicked.connect(self._next_month)
         nav.addWidget(nxt)
         layout.addLayout(nav)
@@ -2128,7 +2219,7 @@ class MonthCalendar(QFrame):
             lbl = QLabel(d)
             lbl.setAlignment(Qt.AlignCenter)
             lbl.setFixedSize(42, 22)
-            lbl.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {TEXT_GRAY}; border: none;")
+            lbl.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {TEXT_DARK}; border: none; background: {WHITE};")
             grid.addWidget(lbl, 0, i)
 
         for r in range(6):
@@ -2353,14 +2444,21 @@ class CalendarPage(QWidget):
 
     def _build(self):
         self.setStyleSheet(f"background: {WHITE};")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 16)
-        layout.setSpacing(12)
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(24, 20, 24, 16)
+        main_layout.setSpacing(16)
 
+        left = QVBoxLayout()
+        left.setSpacing(0)
         self._calendar = MonthCalendar()
         self._calendar.setMaximumWidth(380)
         self._calendar.date_selected.connect(self._on_date_selected)
-        layout.addWidget(self._calendar, alignment=Qt.AlignHCenter)
+        left.addWidget(self._calendar)
+        left.addStretch()
+        main_layout.addLayout(left)
+
+        right = QVBoxLayout()
+        right.setSpacing(12)
 
         header = QHBoxLayout()
         header.setSpacing(8)
@@ -2375,17 +2473,17 @@ class CalendarPage(QWidget):
                                   f"QPushButton:hover {{ background: {STEEL}; }}")
             new_btn.clicked.connect(self._open_create)
             header.addWidget(new_btn)
-        layout.addLayout(header)
+        right.addLayout(header)
 
         self._date_label = QLabel()
         self._date_label.setStyleSheet(f"font-size: 14px; color: {STEEL}; font-weight: bold; border: none;")
-        layout.addWidget(self._date_label)
+        right.addWidget(self._date_label)
 
         self._status_banner = QLabel()
         self._status_banner.setVisible(False)
         self._status_banner.setStyleSheet(f"background: #E8F5E9; color: {GREEN}; border: 1px solid #A5D6A7;"
                                           f" border-radius: 4px; padding: 8px 10px; font-size: 12px; font-weight: bold;")
-        layout.addWidget(self._status_banner)
+        right.addWidget(self._status_banner)
 
         self._appt_scroll = QScrollArea()
         self._appt_scroll.setWidgetResizable(True)
@@ -2396,9 +2494,15 @@ class CalendarPage(QWidget):
         self._appt_layout.setSpacing(6)
         self._appt_layout.addStretch()
         self._appt_scroll.setWidget(self._appt_container)
-        layout.addWidget(self._appt_scroll, stretch=1)
+        right.addWidget(self._appt_scroll, stretch=1)
+
+        main_layout.addLayout(right, stretch=1)
 
     def _refresh_all(self):
+        self._sync_calendar_dots()
+        self._on_date_selected(self._selected_date)
+
+    def _sync_calendar_dots(self):
         dates = set()
         appts = (self._repo.get_appointments_for_lawyer(self._user["user_id"])
                  if self._is_lawyer
@@ -2406,7 +2510,6 @@ class CalendarPage(QWidget):
         for a in appts:
             dates.add(a["date"])
         self._calendar.set_appointment_dates(dates)
-        self._on_date_selected(self._selected_date)
 
     def _on_date_selected(self, date_str):
         self._selected_date = date_str
@@ -2423,16 +2526,30 @@ class CalendarPage(QWidget):
         )
 
     def _refresh_appointments(self, date_str):
-        while self._appt_layout.count():
-            item = self._appt_layout.takeAt(0)
-            if item.widget(): item.widget().deleteLater()
+        clear_layout(self._appt_layout)
         appts = self._repo.get_appointments_for_date(
             self._user["user_id"], self._user["role"], date_str
         )
         if not appts:
-            empty = QLabel("No appointments for this date.")
-            empty.setStyleSheet(f"color: {TEXT_GRAY}; font-size: 13px; border: none; padding: 12px;")
-            self._appt_layout.addWidget(empty)
+            empty_frame = QFrame()
+            empty_frame.setStyleSheet(
+                f"background: {CARD_BG}; border: 1px solid {BORDER}; border-radius: 8px;"
+            )
+            empty_layout = QVBoxLayout(empty_frame)
+            empty_layout.setAlignment(Qt.AlignCenter)
+            empty_layout.setContentsMargins(24, 40, 24, 40)
+            empty_layout.setSpacing(8)
+            icon_lbl = QLabel("📅")
+            icon_lbl.setAlignment(Qt.AlignCenter)
+            icon_lbl.setStyleSheet(f"font-size: 28px; border: none; background: transparent;")
+            empty_layout.addWidget(icon_lbl)
+            empty_text = QLabel("No appointments for this date.")
+            empty_text.setAlignment(Qt.AlignCenter)
+            empty_text.setStyleSheet(
+                f"color: {TEXT_GRAY}; font-size: 14px; border: none; background: transparent;"
+            )
+            empty_layout.addWidget(empty_text)
+            self._appt_layout.addWidget(empty_frame)
         else:
             for a in appts:
                 self._appt_layout.addWidget(self._appointment_card(a))
@@ -2656,6 +2773,7 @@ class CalendarPage(QWidget):
                 if item.widget():
                     item.widget().deleteLater()
             self._show_status_message(f"Appointment {verb} and the client has been notified.", success=True)
+            self._sync_calendar_dots()
         else:
             self._show_status_message(f"Appointment {verb} and the client has been notified.", success=True)
             self._refresh_all()
@@ -2885,12 +3003,18 @@ class PaymentDialog(QDialog):
         grid.setVerticalSpacing(10)
         grid.setHorizontalSpacing(10)
         grid.addWidget(QLabel("* Card Number:"), 0, 0)
+        grid.itemAt(grid.count() - 1).widget().setStyleSheet(
+            f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;"
+        )
         self._card_num = QLineEdit()
         self._card_num.setPlaceholderText("1234 5678 9012 3456")
         self._card_num.setStyleSheet(f"padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
         grid.addWidget(self._card_num, 0, 1)
 
         grid.addWidget(QLabel("* Expiry (MM/YY):"), 1, 0)
+        grid.itemAt(grid.count() - 1).widget().setStyleSheet(
+            f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;"
+        )
         self._expiry = QLineEdit()
         self._expiry.setPlaceholderText("MM/YY")
         self._expiry.setFixedWidth(80)
@@ -2898,6 +3022,9 @@ class PaymentDialog(QDialog):
         grid.addWidget(self._expiry, 1, 1)
 
         grid.addWidget(QLabel("* CVV:"), 2, 0)
+        grid.itemAt(grid.count() - 1).widget().setStyleSheet(
+            f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;"
+        )
         self._cvv = QLineEdit()
         self._cvv.setPlaceholderText("123")
         self._cvv.setEchoMode(QLineEdit.Password)
@@ -3380,6 +3507,37 @@ class EngazApp:
         palette.setColor(QPalette.ColorRole.Highlight, QColor(27, 58, 92))
         palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
         self._app.setPalette(palette)
+        self._app.setStyleSheet("""
+            QCalendarWidget QWidget#qt_calendar_navigationbar {
+                background: #1B3A5C;
+            }
+            QCalendarWidget QToolButton {
+                color: #FFFFFF;
+                background: transparent;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QCalendarWidget QMenu {
+                background: #FFFFFF;
+                color: #1A1A2E;
+            }
+            QCalendarWidget QSpinBox {
+                color: #FFFFFF;
+                background: #1B3A5C;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QCalendarWidget QAbstractItemView {
+                color: #1A1A2E;
+                background: #FFFFFF;
+                selection-background-color: #1B3A5C;
+                selection-color: #FFFFFF;
+            }
+            QCalendarWidget QWidget {
+                color: #6B7280;
+                font-weight: bold;
+            }
+        """)
         self._repo = DataRepository()
         self._login = None
         self._main = None

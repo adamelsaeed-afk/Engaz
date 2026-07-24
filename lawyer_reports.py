@@ -28,16 +28,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, Signal
 from PySide6.QtGui import QColor
 
-NAVY = "#1B3A5C"
-STEEL = "#4A7FB5"
-WHITE = "#FFFFFF"
-CARD_BG = "#F8F9FB"
-TEXT_DARK = "#1A1A2E"
-TEXT_GRAY = "#6B7280"
-GREEN = "#059669"
-AMBER = "#D97706"
-RED = "#DC2626"
-BORDER = "#E5E7EB"
+from engaz_constants import (
+    NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
+    GREEN, AMBER, RED, BORDER, clear_layout,
+)
 
 PALETTE = [NAVY, STEEL, GREEN, AMBER, RED, "#8B5CF6", "#EC4899"]
 
@@ -415,12 +409,11 @@ class LawyerReportsPage(QWidget):
             widget.deleteLater()
         self._all_widgets.clear()
         self._panels.clear()
+        for fig in self._chart_figures.values():
+            plt.close(fig)
         self._chart_figures.clear()
         self._stat_cards.clear()
-        while self._content_layout.count():
-            item = self._content_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._content_layout)
 
     def _add_stat_cards(self, cases):
         row = QHBoxLayout()
@@ -428,6 +421,8 @@ class LawyerReportsPage(QWidget):
 
         total = len(cases)
         c1 = StatCardWidget("Total Cases", str(total), NAVY)
+        c1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        c1.setMaximumWidth(280)
         self._stat_cards.append((c1, "Total Cases", str(total)))
         row.addWidget(c1)
         self._all_widgets.append(c1)
@@ -435,6 +430,8 @@ class LawyerReportsPage(QWidget):
         closed = [c for c in cases if c.get("status") == "Closed"]
         rate = f"{(len(closed) / len(cases) * 100):.1f}%" if cases else "—"
         c2 = StatCardWidget("Closing Rate", rate, GREEN)
+        c2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        c2.setMaximumWidth(280)
         self._stat_cards.append((c2, "Closing Rate", rate))
         row.addWidget(c2)
         self._all_widgets.append(c2)
@@ -450,11 +447,12 @@ class LawyerReportsPage(QWidget):
         else:
             avg_str = "—"
         c3 = StatCardWidget("Avg Time to Close", avg_str, AMBER)
+        c3.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        c3.setMaximumWidth(280)
         self._stat_cards.append((c3, "Avg Time to Close", avg_str))
         row.addWidget(c3)
         self._all_widgets.append(c3)
 
-        row.addStretch()
         self._content_layout.addLayout(row)
 
     def _add_panel(self, title, metric_key, render_fn, data1, data2, data3):
@@ -559,6 +557,7 @@ class LawyerReportsPage(QWidget):
 
             ch_combo.currentTextChanged.connect(on_type_change)
             dlg.exec()
+            plt.close(big_fig)
 
         panel.expand_requested.connect(show_expanded)
         refresh_chart(panel.chart_type())

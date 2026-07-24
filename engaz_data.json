@@ -253,7 +253,7 @@
       "notes": "On-site visit."
     },
     {
-      "appointment_id": "app_1",
+      "appointment_id": "app_6",
       "client_id": "user_4",
       "lawyer_id": "user_1",
       "case_id": "",
@@ -261,11 +261,11 @@
       "date": "2026-07-31",
       "start_time": "08:00",
       "duration_minutes": 60,
-      "status": "Requested",
+      "status": "Declined",
       "notes": ""
     },
     {
-      "appointment_id": "app_1",
+      "appointment_id": "app_7",
       "client_id": "user_4",
       "lawyer_id": "user_1",
       "case_id": "",
@@ -273,7 +273,43 @@
       "date": "2026-07-29",
       "start_time": "08:00",
       "duration_minutes": 60,
-      "status": "Requested",
+      "status": "Declined",
+      "notes": ""
+    },
+    {
+      "appointment_id": "app_8",
+      "client_id": "user_4",
+      "lawyer_id": "user_1",
+      "case_id": "case_5",
+      "title": "new one",
+      "date": "2026-07-30",
+      "start_time": "14:00",
+      "duration_minutes": 60,
+      "status": "Completed",
+      "notes": "i need this appointment at this time"
+    },
+    {
+      "appointment_id": "app_9",
+      "client_id": "user_4",
+      "lawyer_id": "user_1",
+      "case_id": "case_5",
+      "title": "must",
+      "date": "2026-08-02",
+      "start_time": "08:00",
+      "duration_minutes": 30,
+      "status": "Completed",
+      "notes": ""
+    },
+    {
+      "appointment_id": "app_10",
+      "client_id": "user_4",
+      "lawyer_id": "user_1",
+      "case_id": "",
+      "title": "LLM",
+      "date": "2026-07-05",
+      "start_time": "08:00",
+      "duration_minutes": 60,
+      "status": "Completed",
       "notes": ""
     }
   ],
@@ -327,14 +363,14 @@
       "created_at": "2026-07-19T15:22:34.753611"
     },
     {
-      "invoice_id": "inv_1",
+      "invoice_id": "inv_5",
       "invoice_number": "INV-005",
       "case_id": "case_1",
       "lawyer_id": "user_1",
       "client_id": "user_4",
       "description": "rate limit",
       "amount": 15000.0,
-      "status": "Pending",
+      "status": "Paid",
       "due_date": "2026-08-18",
       "created_at": "2026-07-19T15:23:22.789095"
     }
@@ -350,7 +386,7 @@
       "created_at": "2026-07-23T21:08:01.012786"
     },
     {
-      "message_id": "msg_1",
+      "message_id": "msg_2",
       "sender_id": "user_4",
       "receiver_id": "user_1",
       "case_id": "",
@@ -747,8 +783,128 @@
       "message": "Your appointment 'kkkkkkk' on 2026-07-31 has been declined.",
       "notification_type": "appointment_declined",
       "reference_id": "app_1",
-      "is_read": false,
+      "is_read": true,
       "created_at": "2026-07-24T02:01:17.704946"
+    },
+    {
+      "notification_id": "notification_34",
+      "user_id": "user_4",
+      "title": "Appointment Declined",
+      "message": "Your appointment 'kkkkkkk' on 2026-07-31 has been declined.",
+      "notification_type": "appointment_declined",
+      "reference_id": "app_6",
+      "is_read": true,
+      "created_at": "2026-07-24T22:38:54.983117"
+    },
+    {
+      "notification_id": "notification_35",
+      "user_id": "user_1",
+      "title": "New Appointment Request",
+      "message": "John Doe requested an appointment: 'new one' on 2026-07-30.",
+      "notification_type": "appointment_requested",
+      "reference_id": "app_8",
+      "is_read": true,
+      "created_at": "2026-07-24T22:49:21.977368"
+    },
+    {
+      "notification_id": "notification_36",
+      "user_id": "user_4",
+      "title": "Appointment Approved",
+      "message": "Your appointment 'new one' on 2026-07-30 has been approved.",
+      "notification_type": "appointment_approved",
+      "reference_id": "app_8",
+      "is_read": true,
+      "created_at": "2026-07-24T23:10:31.379173"
+    },
+    {
+      "notification_id": "notification_37",
+      "user_id": "user_1",
+      "title": "Invoice Paid",
+      "message": "Invoice INV-005 for $15,000.00 has been paid.",
+      "notification_type": "invoice_paid",
+      "reference_id": "inv_5",
+      "is_read": true,
+      "created_at": "2026-07-24T23:14:14.825644"
+    },
+    {
+      "notification_id": "notification_38",
+      "user_id": "user_4",
+      "title": "Appointment Declined",
+      "message": "Your appointment 'kkkkkkkk' on 2026-07-29 has been declined.",
+      "notification_type": "appointment_declined",
+      "reference_id": "app_7",
+      "is_read": true,
+      "created_at": "2026-07-25T00:21:27.078435"
+    },
+    {
+      "notification_id": "notification_39",
+      "user_id": "user_1",
+      "title": "New Appointment Request",
+      "message": "John Doe requested an appointment: 'must' on 2026-08-02.",
+      "notification_type": "appointment_requested",
+      "reference_id": "app_9",
+      "is_read": true,
+      "created_at": "2026-07-25T00:39:47.451033"
+    },
+    {
+      "notification_id": "notification_40",
+      "user_id": "user_4",
+      "title": "Appointment Approved",
+      "message": "Your appointment 'must' on 2026-08-02 has been approved.",
+      "notification_type": "appointment_approved",
+      "reference_id": "app_9",
+      "is_read": true,
+      "created_at": "2026-07-25T00:40:24.660067"
+    },
+    {
+      "notification_id": "notification_41",
+      "user_id": "user_4",
+      "title": "Appointment Completed",
+      "message": "Your appointment 'must' on 2026-08-02 has been completed.",
+      "notification_type": "appointment_completed",
+      "reference_id": "app_9",
+      "is_read": true,
+      "created_at": "2026-07-25T00:40:29.667015"
+    },
+    {
+      "notification_id": "notification_42",
+      "user_id": "user_1",
+      "title": "New Appointment Request",
+      "message": "John Doe requested an appointment: 'LLM' on 2026-07-05.",
+      "notification_type": "appointment_requested",
+      "reference_id": "app_10",
+      "is_read": true,
+      "created_at": "2026-07-25T01:28:13.501644"
+    },
+    {
+      "notification_id": "notification_43",
+      "user_id": "user_4",
+      "title": "Appointment Approved",
+      "message": "Your appointment 'LLM' on 2026-07-05 has been approved.",
+      "notification_type": "appointment_approved",
+      "reference_id": "app_10",
+      "is_read": true,
+      "created_at": "2026-07-25T01:28:35.024085"
+    },
+    {
+      "notification_id": "notification_44",
+      "user_id": "user_4",
+      "title": "Appointment Completed",
+      "message": "Your appointment 'LLM' on 2026-07-05 has been completed.",
+      "notification_type": "appointment_completed",
+      "reference_id": "app_10",
+      "is_read": true,
+      "created_at": "2026-07-25T01:51:22.007922"
+    },
+    {
+      "notification_id": "notification_45",
+      "user_id": "user_4",
+      "title": "Appointment Completed",
+      "message": "Your appointment 'new one' on 2026-07-30 has been completed.",
+      "notification_type": "appointment_completed",
+      "reference_id": "app_8",
+      "is_read": true,
+      "created_at": "2026-07-25T01:51:27.589523"
     }
   ],
   "case_files": [
@@ -804,7 +960,7 @@
       "created_at": "2026-07-24T00:33:07.374214"
     },
     {
-      "comment_id": "bcomment_1",
+      "comment_id": "bcomment_2",
       "book_id": "book_1",
       "user_id": "user_1",
       "title": "help",
@@ -813,7 +969,7 @@
       "created_at": "2026-07-24T00:38:10.749236"
     },
     {
-      "comment_id": "bcomment_1",
+      "comment_id": "bcomment_3",
       "book_id": "book_1",
       "user_id": "user_1",
       "title": "kkkkkkk",
@@ -822,7 +978,7 @@
       "created_at": "2026-07-24T00:58:20.563495"
     },
     {
-      "comment_id": "bcomment_1",
+      "comment_id": "bcomment_4",
       "book_id": "book_1",
       "user_id": "user_1",
       "title": "jjjjjj",

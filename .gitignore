@@ -30,7 +30,10 @@ project_specification.md
 PLAN.md
 lawyer_booking_system_spec.md
 calendar_layout_prompt.md
-
+engaz-handoff.md
+audit_gemini.md
+engaz_implementation_plan.md
+engaz_features_14_22_instructions.md
 # json  files
 skills-lock.json
 # --- Ignore Docker files ---

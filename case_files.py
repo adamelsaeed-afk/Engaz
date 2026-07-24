@@ -8,40 +8,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QDesktopServices
 
-NAVY = "#1B3A5C"
-STEEL = "#4A7FB5"
-WHITE = "#FFFFFF"
-CARD_BG = "#F8F9FB"
-TEXT_DARK = "#1A1A2E"
-TEXT_GRAY = "#6B7280"
-GREEN = "#059669"
-AMBER = "#D97706"
-RED = "#DC2626"
-BORDER = "#E5E7EB"
-
-
-def _status_badge_local(status_text):
-    colors = {
-        "Open": (STEEL, WHITE),
-        "In Progress": (AMBER, WHITE),
-        "Closed": (TEXT_GRAY, WHITE),
-        "Approved": (GREEN, WHITE),
-        "Requested": (AMBER, WHITE),
-        "Declined": (RED, WHITE),
-        "Completed": (STEEL, WHITE),
-        "Cancelled": (TEXT_GRAY, WHITE),
-        "Pending": (AMBER, WHITE),
-        "Paid": (GREEN, WHITE),
-        "Overdue": (RED, WHITE),
-    }
-    bg, fg = colors.get(status_text, (TEXT_GRAY, WHITE))
-    lbl = QLabel(status_text)
-    lbl.setAlignment(Qt.AlignCenter)
-    lbl.setStyleSheet(
-        f"background: {bg}; color: {fg}; padding: 2px 10px; "
-        f"border-radius: 10px; font-size: 11px; font-weight: bold;"
-    )
-    return lbl
+from engaz_constants import (
+    NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
+    GREEN, AMBER, RED, BORDER, _status_badge,
+)
 
 
 class AddFileDialog(QDialog):
@@ -298,7 +268,7 @@ class CaseDetailView(QDialog):
             lbl.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {NAVY}; border: none;")
             info_grid.addWidget(lbl, r, 0, Qt.AlignRight | Qt.AlignTop)
             if label == "Status":
-                info_grid.addWidget(_status_badge_local(self._case["status"]), r, 1)
+                info_grid.addWidget(_status_badge(self._case["status"]), r, 1)
             else:
                 val = QLabel(value)
                 val.setWordWrap(True)

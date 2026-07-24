@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTextEdit, QScrollArea, QFrame, QDialog, QComboBox, QDialogButtonBox,
@@ -7,28 +5,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 
-# Color constants mirrored from invoicesystem.py (avoid circular import)
-NAVY = "#1B3A5C"
-STEEL = "#4A7FB5"
-WHITE = "#FFFFFF"
-CARD_BG = "#F8F9FB"
-TEXT_DARK = "#1A1A2E"
-TEXT_GRAY = "#6B7280"
-GREEN = "#059669"
-AMBER = "#D97706"
-RED = "#DC2626"
-BORDER = "#E5E7EB"
-
-
-def _format_time(iso_string):
-    try:
-        dt = datetime.fromisoformat(iso_string)
-        now = datetime.now()
-        if dt.date() == now.date():
-            return dt.strftime("%I:%M %p")
-        return dt.strftime("%b %d")
-    except (ValueError, TypeError):
-        return ""
+from engaz_constants import (
+    NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
+    GREEN, AMBER, RED, BORDER, _format_time, clear_layout,
+)
 
 
 class NewConversationDialog(QDialog):
@@ -85,12 +65,13 @@ class NewConversationDialog(QDialog):
         self._populate_contacts()
 
     def _populate_contacts(self):
-        if self._is_lawyer:
-            cases = self._repo.get_cases_for_lawyer(self._user["user_id"])
-        else:
-            cases = self._repo.get_cases_for_client(self._user["user_id"])
+        self._all_cases = (
+            self._repo.get_cases_for_lawyer(self._user["user_id"])
+            if self._is_lawyer
+            else self._repo.get_cases_for_client(self._user["user_id"])
+        )
         seen = set()
-        for case in cases:
+        for case in self._all_cases:
             partner_id = case["client_id"] if self._is_lawyer else case["lawyer_id"]
             if partner_id not in seen:
                 seen.add(partner_id)
@@ -100,6 +81,28 @@ class NewConversationDialog(QDialog):
                     self._contact_combo.addItem(name, partner_id)
         if self._contact_combo.count() == 0:
             self._contact_combo.addItem("No contacts available", "")
+
+        for case in self._all_cases:
+            display = f"{case['case_number']} — {case['title']}"
+            self._case_combo.addItem(display, case["case_id"])
+
+        self._contact_combo.currentIndexChanged.connect(self._on_contact_changed)
+
+    def _on_contact_changed(self):
+        partner_id = self._contact_combo.currentData()
+        current_case = self._case_combo.currentData()
+        for i in range(self._case_combo.count() - 1, 0, -1):
+            self._case_combo.removeItem(i)
+        if not partner_id:
+            return
+        for case in self._all_cases:
+            case_partner = case["client_id"] if self._is_lawyer else case["lawyer_id"]
+            if case_partner == partner_id:
+                display = f"{case['case_number']} — {case['title']}"
+                self._case_combo.addItem(display, case["case_id"])
+        idx = self._case_combo.findData(current_case)
+        if idx >= 0:
+            self._case_combo.setCurrentIndex(idx)
 
     def selected_partner_id(self):
         return self._contact_combo.currentData()
@@ -266,14 +269,13 @@ class MessageThreadWidget(QWidget):
         QTimer.singleShot(30, self._scroll_to_bottom)
 
     def _scroll_to_bottom(self):
+        if not self.isVisible():
+            return
         sb = self._scroll.verticalScrollBar()
         sb.setValue(sb.maximum())
 
     def _clear_messages(self):
-        while self._msg_layout.count():
-            item = self._msg_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._msg_layout)
 
     def _send(self):
         content = self._input.toPlainText().strip()
@@ -334,10 +336,7 @@ class ConversationListWidget(QWidget):
         layout.addWidget(self._scroll, stretch=1)
 
     def refresh(self):
-        while self._list_layout.count():
-            item = self._list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._list_layout)
         conversations = self._repo.get_conversations_for_user(self._user["user_id"])
         if self._is_lawyer:
             overdue = self._repo.get_overdue_reply_threads(self._user["user_id"])

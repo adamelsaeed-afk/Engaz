@@ -1,6 +1,5 @@
 import os
 import shutil
-from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -11,30 +10,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QUrl, QTimer
 from PySide6.QtGui import QColor, QDesktopServices
 
-NAVY = "#1B3A5C"
-STEEL = "#4A7FB5"
-WHITE = "#FFFFFF"
-CARD_BG = "#F8F9FB"
-TEXT_DARK = "#1A1A2E"
-TEXT_GRAY = "#6B7280"
-GREEN = "#059669"
-AMBER = "#D97706"
-RED = "#DC2626"
-BORDER = "#E5E7EB"
+from engaz_constants import (
+    NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
+    GREEN, AMBER, RED, BORDER, _format_time, clear_layout,
+)
 
 LAW_BOOKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "law_books")
-
-
-def _format_time(iso_string):
-    try:
-        dt = datetime.fromisoformat(iso_string)
-        now = datetime.now()
-        if dt.date() == now.date():
-            return dt.strftime("%I:%M %p")
-        return dt.strftime("%b %d, %Y")
-    except (ValueError, TypeError):
-        return ""
-
 
 def _field_style():
     return f"padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px;" \
@@ -114,6 +95,12 @@ class AddBookDialog(QDialog):
         layout.addStretch()
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.setStyleSheet(f"""
+            QPushButton {{ padding: 6px 16px; border-radius: 4px; font-size: 13px;
+                           color: {TEXT_DARK}; background: {WHITE};
+                           border: 1px solid {BORDER}; }}
+            QPushButton:hover {{ background: {CARD_BG}; }}
+        """)
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -171,12 +158,18 @@ class AddCommentDialog(QDialog):
         layout.setSpacing(10)
 
         layout.addWidget(QLabel("Title"))
+        layout.itemAt(layout.count() - 1).widget().setStyleSheet(
+            f"font-size: 13px; font-weight: bold; color: {TEXT_DARK}; border: none;"
+        )
         self._title_input = QLineEdit()
         self._title_input.setStyleSheet(_field_style())
         layout.addWidget(self._title_input)
 
         pg_row = QHBoxLayout()
         pg_row.addWidget(QLabel("Page #"))
+        pg_row.itemAt(pg_row.count() - 1).widget().setStyleSheet(
+            f"font-size: 13px; font-weight: bold; color: {TEXT_DARK}; border: none;"
+        )
         self._page_input = QSpinBox()
         self._page_input.setMinimum(1)
         self._page_input.setMaximum(9999)
@@ -187,13 +180,23 @@ class AddCommentDialog(QDialog):
         layout.addLayout(pg_row)
 
         layout.addWidget(QLabel("Comment"))
+        layout.itemAt(layout.count() - 1).widget().setStyleSheet(
+            f"font-size: 13px; font-weight: bold; color: {TEXT_DARK}; border: none;"
+        )
         self._content_input = QTextEdit()
         self._content_input.setStyleSheet(_field_style())
         self._content_input.setMaximumHeight(100)
         layout.addWidget(self._content_input)
 
         layout.addStretch()
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.setStyleSheet(f"""
+            QPushButton {{ padding: 6px 16px; border-radius: 4px; font-size: 13px;
+                           color: {TEXT_DARK}; background: {WHITE};
+                           border: 1px solid {BORDER}; }}
+            QPushButton:hover {{ background: {CARD_BG}; }}
+        """)
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -204,6 +207,7 @@ class AddCommentDialog(QDialog):
         if not self._content_input.toPlainText().strip():
             return
         self.accept()
+
 
     def get_data(self):
         return {
@@ -256,10 +260,7 @@ class BookChatWidget(QWidget):
         layout.addWidget(input_area)
 
     def _clear_messages(self):
-        while self._msg_layout.count():
-            item = self._msg_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._msg_layout)
 
     def _refresh(self):
         self._clear_messages()
@@ -289,8 +290,13 @@ class BookChatWidget(QWidget):
             bl.addWidget(cl)
             self._msg_layout.addWidget(bubble)
         self._msg_layout.addStretch()
-        QTimer.singleShot(30, lambda: self._scroll.verticalScrollBar().setValue(
-            self._scroll.verticalScrollBar().maximum()))
+        QTimer.singleShot(30, self._scroll_to_bottom)
+
+    def _scroll_to_bottom(self):
+        if not self.isVisible():
+            return
+        self._scroll.verticalScrollBar().setValue(
+            self._scroll.verticalScrollBar().maximum())
 
     def _send(self):
         content = self._input.text().strip()
@@ -341,10 +347,7 @@ class BookCommentsWidget(QWidget):
         layout.addWidget(self._scroll, stretch=1)
 
     def _clear(self):
-        while self._list_layout.count():
-            item = self._list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._list_layout)
 
     def _refresh(self):
         self._clear()
@@ -520,10 +523,7 @@ class BookListView(QWidget):
         layout.addWidget(self._scroll, stretch=1)
 
     def _clear(self):
-        while self._list_layout.count():
-            item = self._list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        clear_layout(self._list_layout)
 
     def refresh(self):
         self._clear()
