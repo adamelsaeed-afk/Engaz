@@ -462,13 +462,26 @@ class MessagingPage(QWidget):
         self._conv_list.conversation_selected.connect(self._on_conversation_selected)
         left_layout.addWidget(self._conv_list, stretch=1)
 
-        new_btn = QPushButton("+ New Conversation")
-        new_btn.setFixedHeight(40)
-        new_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
-                              f" font-size: 13px; font-weight: bold; }}"
-                              f"QPushButton:hover {{ background: {STEEL}; }}")
-        new_btn.clicked.connect(self._open_new_conversation)
-        left_layout.addWidget(new_btn)
+        self._fab_btn = QPushButton("+")
+        self._fab_btn.setFixedSize(36, 36)
+        self._fab_btn.setCursor(Qt.PointingHandCursor)
+        self._fab_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {NAVY}; color: {WHITE};
+                border: none; border-radius: 18px;
+                font-size: 20px; font-weight: bold;
+                padding: 0; text-align: center;
+            }}
+            QPushButton:hover {{
+                background: {STEEL};
+            }}
+        """)
+        self._fab_btn.setToolTip("New Conversation")
+        self._fab_btn.setParent(left_panel)
+        self._fab_btn.clicked.connect(self._open_new_conversation)
+        self._fab_btn.raise_()
+
+        left_panel.resizeEvent = self._reposition_fab
 
         splitter.addWidget(left_panel)
 
@@ -483,6 +496,11 @@ class MessagingPage(QWidget):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
         outer_layout.addWidget(splitter)
+
+    def _reposition_fab(self, event):
+        QFrame.resizeEvent(self._fab_btn.parent(), event)
+        parent = self._fab_btn.parent()
+        self._fab_btn.move(parent.width() - 46, parent.height() - 46)
 
     def refresh(self):
         self._conv_list.refresh()

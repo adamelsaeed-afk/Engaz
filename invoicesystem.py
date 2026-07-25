@@ -1458,6 +1458,8 @@ class HeaderBar(QFrame):
 
 class DashboardPage(QWidget):
     appointment_clicked = Signal(str)
+    navigate_to = Signal(int)
+    toggle_notifications = Signal()
 
     def __init__(self, repo, user, parent=None):
         super().__init__(parent)
@@ -1539,11 +1541,17 @@ class DashboardPage(QWidget):
         cards = QHBoxLayout()
         cards.setSpacing(16)
         c1 = StatCard("Active Cases", self._repo.count_active_cases_for_lawyer(uid))
+        c1.setCursor(Qt.PointingHandCursor)
+        c1.clicked.connect(lambda: self.navigate_to.emit(PAGE_CASES))
         c2 = StatCard("Pending Appointments", self._repo.count_pending_appointments_for_lawyer(uid))
         c2.setCursor(Qt.PointingHandCursor)
-        c2.clicked.connect(lambda: self.appointment_clicked.emit(datetime.now().strftime("%Y-%m-%d")))
+        c2.clicked.connect(lambda: self.navigate_to.emit(PAGE_CALENDAR))
         c3 = StatCard("Pending Invoices", self._repo.count_unpaid_invoices(), AMBER)
+        c3.setCursor(Qt.PointingHandCursor)
+        c3.clicked.connect(lambda: self.navigate_to.emit(PAGE_INVOICES))
         c4 = StatCard("Unread Notifications", self._repo.unread_notification_count(uid), RED)
+        c4.setCursor(Qt.PointingHandCursor)
+        c4.clicked.connect(lambda: self.toggle_notifications.emit())
         self._stat_cards = [c1, c2, c3, c4]
         cards.addWidget(c1)
         cards.addWidget(c2)
@@ -3440,6 +3448,8 @@ class MainWindow(QWidget):
             self._pages.addWidget(DashboardPage(self._repo, self._user))
             dashboard = self._pages.widget(PAGE_DASHBOARD)
             dashboard.appointment_clicked.connect(self._on_appointment_clicked)
+            dashboard.navigate_to.connect(self._navigate_to_page)
+            dashboard.toggle_notifications.connect(self._header._toggle_notifications)
             self._pages.addWidget(Casepagemain(self._repo, self._user))
             self._pages.addWidget(CalendarPage(self._repo, self._user))
             self._pages.addWidget(InvoicesPage(self._repo, self._user))
