@@ -35,6 +35,7 @@ NOTIFICATION_PAGE = {
     "invoice_paid": PAGE_INVOICES,
     "message_received": PAGE_MESSAGES,
     "case_created": PAGE_CASES,
+    "case_attachment_added": PAGE_CASES,
 }
 
 

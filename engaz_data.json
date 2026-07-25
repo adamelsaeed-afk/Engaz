@@ -311,6 +311,54 @@
       "duration_minutes": 60,
       "status": "Completed",
       "notes": ""
+    },
+    {
+      "appointment_id": "app_11",
+      "client_id": "user_4",
+      "lawyer_id": "user_1",
+      "case_id": "",
+      "title": "important",
+      "date": "2026-07-25",
+      "start_time": "08:00",
+      "duration_minutes": 60,
+      "status": "Completed",
+      "notes": ""
+    },
+    {
+      "appointment_id": "app_12",
+      "client_id": "user_4",
+      "lawyer_id": "user_1",
+      "case_id": "",
+      "title": "imp",
+      "date": "2026-07-19",
+      "start_time": "08:00",
+      "duration_minutes": 60,
+      "status": "Approved",
+      "notes": ""
+    },
+    {
+      "appointment_id": "app_13",
+      "client_id": "user_4",
+      "lawyer_id": "user_1",
+      "case_id": "",
+      "title": "imp",
+      "date": "2026-07-19",
+      "start_time": "08:00",
+      "duration_minutes": 60,
+      "status": "Cancelled",
+      "notes": ""
+    },
+    {
+      "appointment_id": "app_14",
+      "client_id": "user_4",
+      "lawyer_id": "user_1",
+      "case_id": "",
+      "title": "impo",
+      "date": "2026-07-19",
+      "start_time": "14:30",
+      "duration_minutes": 60,
+      "status": "Declined",
+      "notes": ""
     }
   ],
   "invoices": [
@@ -905,6 +953,106 @@
       "reference_id": "app_8",
       "is_read": true,
       "created_at": "2026-07-25T01:51:27.589523"
+    },
+    {
+      "notification_id": "notification_46",
+      "user_id": "user_1",
+      "title": "New Appointment Request",
+      "message": "John Doe requested an appointment: 'important' on 2026-07-25.",
+      "notification_type": "appointment_requested",
+      "reference_id": "app_11",
+      "is_read": true,
+      "created_at": "2026-07-25T02:46:53.481098"
+    },
+    {
+      "notification_id": "notification_47",
+      "user_id": "user_4",
+      "title": "Appointment Approved",
+      "message": "Your appointment 'important' on 2026-07-25 has been approved.",
+      "notification_type": "appointment_approved",
+      "reference_id": "app_11",
+      "is_read": true,
+      "created_at": "2026-07-25T02:47:29.759405"
+    },
+    {
+      "notification_id": "notification_48",
+      "user_id": "user_4",
+      "title": "Appointment Completed",
+      "message": "Your appointment 'important' on 2026-07-25 has been completed.",
+      "notification_type": "appointment_completed",
+      "reference_id": "app_11",
+      "is_read": true,
+      "created_at": "2026-07-25T03:17:25.061299"
+    },
+    {
+      "notification_id": "notification_49",
+      "user_id": "user_4",
+      "title": "New Case Attachment",
+      "message": "New attachment added to case: kkkkk",
+      "notification_type": "case_attachment_added",
+      "reference_id": "case_7",
+      "is_read": true,
+      "created_at": "2026-07-25T03:22:34.881548"
+    },
+    {
+      "notification_id": "notification_50",
+      "user_id": "user_1",
+      "title": "New Appointment Request",
+      "message": "John Doe requested an appointment: 'imp' on 2026-07-19.",
+      "notification_type": "appointment_requested",
+      "reference_id": "app_12",
+      "is_read": true,
+      "created_at": "2026-07-25T04:07:43.478615"
+    },
+    {
+      "notification_id": "notification_51",
+      "user_id": "user_1",
+      "title": "New Appointment Request",
+      "message": "John Doe requested an appointment: 'imp' on 2026-07-19.",
+      "notification_type": "appointment_requested",
+      "reference_id": "app_13",
+      "is_read": true,
+      "created_at": "2026-07-25T04:08:10.081036"
+    },
+    {
+      "notification_id": "notification_52",
+      "user_id": "user_4",
+      "title": "Appointment Cancelled",
+      "message": "Your appointment 'imp' on 2026-07-19 has been cancelled.",
+      "notification_type": "appointment_cancelled",
+      "reference_id": "app_13",
+      "is_read": false,
+      "created_at": "2026-07-25T04:08:14.570998"
+    },
+    {
+      "notification_id": "notification_53",
+      "user_id": "user_1",
+      "title": "New Appointment Request",
+      "message": "John Doe requested an appointment: 'impo' on 2026-07-19.",
+      "notification_type": "appointment_requested",
+      "reference_id": "app_14",
+      "is_read": true,
+      "created_at": "2026-07-25T04:08:26.729195"
+    },
+    {
+      "notification_id": "notification_54",
+      "user_id": "user_4",
+      "title": "Appointment Approved",
+      "message": "Your appointment 'imp' on 2026-07-19 has been approved.",
+      "notification_type": "appointment_approved",
+      "reference_id": "app_12",
+      "is_read": false,
+      "created_at": "2026-07-25T04:09:13.303814"
+    },
+    {
+      "notification_id": "notification_55",
+      "user_id": "user_4",
+      "title": "Appointment Declined",
+      "message": "Your appointment 'impo' on 2026-07-19 has been declined.",
+      "notification_type": "appointment_declined",
+      "reference_id": "app_14",
+      "is_read": false,
+      "created_at": "2026-07-25T04:09:15.962914"
     }
   ],
   "case_files": [

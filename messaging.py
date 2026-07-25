@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTextEdit, QScrollArea, QFrame, QDialog, QComboBox, QDialogButtonBox,
-    QSizePolicy,
+    QSizePolicy, QSplitter,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 
@@ -9,6 +9,8 @@ from engaz_constants import (
     NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
     GREEN, AMBER, RED, BORDER, _format_time, clear_layout,
 )
+
+from invoicesystem import ArrowComboBox
 
 
 class NewConversationDialog(QDialog):
@@ -33,7 +35,7 @@ class NewConversationDialog(QDialog):
         lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {TEXT_DARK}; border: none;")
         layout.addWidget(lbl)
 
-        self._contact_combo = QComboBox()
+        self._contact_combo = ArrowComboBox()
         self._contact_combo.setStyleSheet(f"""
             QComboBox {{ padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px;
                           font-size: 13px; color: {TEXT_DARK}; background: {WHITE}; }}
@@ -45,7 +47,7 @@ class NewConversationDialog(QDialog):
         case_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_GRAY}; border: none;")
         layout.addWidget(case_lbl)
 
-        self._case_combo = QComboBox()
+        self._case_combo = ArrowComboBox()
         self._case_combo.setStyleSheet(f"""
             QComboBox {{ padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px;
                           font-size: 13px; color: {TEXT_DARK}; background: {WHITE}; }}
@@ -65,13 +67,12 @@ class NewConversationDialog(QDialog):
         self._populate_contacts()
 
     def _populate_contacts(self):
-        self._all_cases = (
-            self._repo.get_cases_for_lawyer(self._user["user_id"])
-            if self._is_lawyer
-            else self._repo.get_cases_for_client(self._user["user_id"])
-        )
+        if self._is_lawyer:
+            cases = self._repo.get_cases_for_lawyer(self._user["user_id"])
+        else:
+            cases = self._repo.get_cases_for_client(self._user["user_id"])
         seen = set()
-        for case in self._all_cases:
+        for case in cases:
             partner_id = case["client_id"] if self._is_lawyer else case["lawyer_id"]
             if partner_id not in seen:
                 seen.add(partner_id)
@@ -82,27 +83,23 @@ class NewConversationDialog(QDialog):
         if self._contact_combo.count() == 0:
             self._contact_combo.addItem("No contacts available", "")
 
-        for case in self._all_cases:
-            display = f"{case['case_number']} — {case['title']}"
-            self._case_combo.addItem(display, case["case_id"])
-
         self._contact_combo.currentIndexChanged.connect(self._on_contact_changed)
+        self._on_contact_changed(0)
 
-    def _on_contact_changed(self):
+    def _on_contact_changed(self, index):
         partner_id = self._contact_combo.currentData()
-        current_case = self._case_combo.currentData()
-        for i in range(self._case_combo.count() - 1, 0, -1):
-            self._case_combo.removeItem(i)
+        self._case_combo.clear()
+        self._case_combo.addItem("(No case — direct message)", "")
         if not partner_id:
             return
-        for case in self._all_cases:
-            case_partner = case["client_id"] if self._is_lawyer else case["lawyer_id"]
-            if case_partner == partner_id:
-                display = f"{case['case_number']} — {case['title']}"
-                self._case_combo.addItem(display, case["case_id"])
-        idx = self._case_combo.findData(current_case)
-        if idx >= 0:
-            self._case_combo.setCurrentIndex(idx)
+        if self._is_lawyer:
+            cases = self._repo.get_cases_for_lawyer(self._user["user_id"])
+            shared_cases = [c for c in cases if c["client_id"] == partner_id]
+        else:
+            cases = self._repo.get_cases_for_client(self._user["user_id"])
+            shared_cases = [c for c in cases if c["lawyer_id"] == partner_id]
+        for case in shared_cases:
+            self._case_combo.addItem(f"{case['title']} (#{case['case_id'][:8]})", case["case_id"])
 
     def selected_partner_id(self):
         return self._contact_combo.currentData()
@@ -442,12 +439,20 @@ class MessagingPage(QWidget):
         self._build()
 
     def _build(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(5)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background: #E5E7EB;
+            }
+            QSplitter::handle:hover {
+                background: #94A3B8;
+            }
+        """)
 
         left_panel = QFrame()
-        left_panel.setFixedWidth(290)
+        left_panel.setMinimumWidth(200)
+        left_panel.setMaximumWidth(450)
         left_panel.setStyleSheet(f"background: {WHITE}; border-right: 1px solid {BORDER};")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -465,11 +470,19 @@ class MessagingPage(QWidget):
         new_btn.clicked.connect(self._open_new_conversation)
         left_layout.addWidget(new_btn)
 
-        layout.addWidget(left_panel)
+        splitter.addWidget(left_panel)
 
         self._thread = MessageThreadWidget(self._repo, self._user)
         self._thread.message_sent.connect(self._on_message_sent)
-        layout.addWidget(self._thread, stretch=1)
+        self._thread.setMinimumWidth(300)
+        splitter.addWidget(self._thread)
+
+        splitter.setSizes([290, 700])
+
+        outer_layout = QHBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+        outer_layout.addWidget(splitter)
 
     def refresh(self):
         self._conv_list.refresh()

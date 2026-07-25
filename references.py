@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QUrl, QTimer
 from PySide6.QtGui import QColor, QDesktopServices
 
+from invoicesystem import ArrowComboBox
+
 from engaz_constants import (
     NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
     GREEN, AMBER, RED, BORDER, _format_time, clear_layout,
@@ -70,7 +72,7 @@ class AddBookDialog(QDialog):
         cat_row.addWidget(QLabel("Category"))
         cat_row.itemAt(0).widget().setFixedWidth(80)
         cat_row.itemAt(0).widget().setStyleSheet(f"font-size: 12px; font-weight: bold; color: {TEXT_DARK}; border: none;")
-        self._category = QComboBox()
+        self._category = ArrowComboBox()
         self._category.addItems(["Criminal Law", "Civil Law", "Corporate Law", "Family Law", "Constitutional", "Other"])
         self._category.setStyleSheet(_field_style())
         cat_row.addWidget(self._category, stretch=1)

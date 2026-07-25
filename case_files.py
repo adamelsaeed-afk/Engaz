@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QDialog, QFileDialog, QFrame, QScrollArea, QGridLayout, QSizePolicy,
+    QMenu, QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -153,12 +154,6 @@ class CaseFileListWidget(QWidget):
             self._table.setItem(row, 1, QTableWidgetItem(adder_name))
             self._table.setItem(row, 2, QTableWidgetItem(f["added_at"][:10]))
 
-            actions = QWidget()
-            actions.setStyleSheet("border: none; background: transparent;")
-            actions_layout = QHBoxLayout(actions)
-            actions_layout.setContentsMargins(0, 0, 0, 0)
-            actions_layout.setSpacing(4)
-
             col_offset = 0
 
             if self._is_lawyer:
@@ -168,29 +163,50 @@ class CaseFileListWidget(QWidget):
                 self._table.setItem(row, 3, shared_item)
                 col_offset = 1
 
-                toggle_btn = QPushButton("Share" if not f["shared_with_client"] else "Unshare")
-                toggle_btn.setStyleSheet(f"QPushButton {{ color: {STEEL}; border: none; font-size: 11px;"
-                                         f" background: transparent; padding: 2px 6px; }}"
-                                         f"QPushButton:hover {{ color: {NAVY}; text-decoration: underline; }}")
-                toggle_btn.clicked.connect(lambda chk, fid=f["file_id"]: self._toggle_share(fid))
-                actions_layout.addWidget(toggle_btn)
+            kebab_btn = QPushButton("\u22ee")
+            kebab_btn.setFixedSize(28, 28)
+            kebab_btn.setCursor(Qt.PointingHandCursor)
+            kebab_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent; border: none;
+                    font-size: 18px; font-weight: bold; color: #6B7280;
+                }
+                QPushButton:hover { background: #F3F4F6; border-radius: 4px; }
+            """)
 
-            open_btn = QPushButton("Open")
-            open_btn.setStyleSheet(f"QPushButton {{ color: {GREEN}; border: none; font-size: 11px;"
-                                   f" background: transparent; padding: 2px 6px; }}"
-                                   f"QPushButton:hover {{ text-decoration: underline; }}")
-            open_btn.clicked.connect(lambda chk, fp=f["file_path"]: self._open_file(fp))
-            actions_layout.addWidget(open_btn)
+            menu = QMenu(kebab_btn)
+            menu.setStyleSheet("""
+                QMenu {
+                    background: white; border: 1px solid #E5E7EB; border-radius: 6px;
+                    padding: 4px 0;
+                }
+                QMenu::item { padding: 6px 16px; font-size: 12px; }
+                QMenu::item:selected { background: #F3F4F6; }
+            """)
 
-            remove_btn = QPushButton("Remove")
-            remove_btn.setStyleSheet(f"QPushButton {{ color: {RED}; border: none; font-size: 11px;"
-                                     f" background: transparent; padding: 2px 6px; }}"
-                                     f"QPushButton:hover {{ text-decoration: underline; }}")
-            remove_btn.clicked.connect(lambda chk, fid=f["file_id"]: self._remove_file(fid))
-            actions_layout.addWidget(remove_btn)
+            open_action = menu.addAction("Open")
+            open_action.triggered.connect(lambda chk=False, fp=f["file_path"]: self._open_file(fp))
 
-            actions_layout.addStretch()
-            self._table.setCellWidget(row, 3 + col_offset, actions)
+            if self._is_lawyer:
+                label = "Unshare" if f["shared_with_client"] else "Share with Client"
+                share_action = menu.addAction(label)
+                share_action.triggered.connect(lambda chk=False, fid=f["file_id"]: self._toggle_share(fid))
+
+            remove_action = menu.addAction("Remove")
+            remove_action.triggered.connect(lambda chk=False, fid=f["file_id"]: self._remove_file(fid))
+
+            kebab_btn.clicked.connect(
+                lambda chk=False, b=kebab_btn, m=menu:
+                    m.exec(b.mapToGlobal(b.rect().bottomLeft()))
+            )
+
+            wrapper = QWidget()
+            wrapper.setStyleSheet("border: none; background: transparent;")
+            wrapper_layout = QHBoxLayout(wrapper)
+            wrapper_layout.setContentsMargins(0, 0, 0, 0)
+            wrapper_layout.addStretch()
+            wrapper_layout.addWidget(kebab_btn)
+            self._table.setCellWidget(row, 3 + col_offset, wrapper)
 
     def _add_file(self):
         dlg = AddFileDialog(parent=self)
@@ -207,11 +223,28 @@ class CaseFileListWidget(QWidget):
         self.files_changed.emit()
 
     def _toggle_share(self, file_id):
-        self._repo.toggle_file_sharing(file_id)
+        updated = self._repo.toggle_file_sharing(file_id)
+        if updated and updated.get("shared_with_client"):
+            case = self._repo.get_case(self._case_id)
+            if case:
+                self._repo.create_notification({
+                    "user_id": case["client_id"],
+                    "title": "New Case Attachment",
+                    "message": f"New attachment added to case: {case['title']}",
+                    "notification_type": "case_attachment_added",
+                    "reference_id": self._case_id,
+                })
         self._load()
         self.files_changed.emit()
 
     def _remove_file(self, file_id):
+        reply = QMessageBox.question(
+            self, "Confirm Removal",
+            "Are you sure you want to remove this file? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
         self._repo.delete_case_file(file_id)
         self._load()
         self.files_changed.emit()
@@ -220,7 +253,6 @@ class CaseFileListWidget(QWidget):
         if os.path.exists(file_path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
         else:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "File Not Found",
                                 f"The file could not be found at:\n{file_path}")
 

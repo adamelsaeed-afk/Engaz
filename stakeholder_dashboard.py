@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
+from invoicesystem import ArrowComboBox
+
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.units import inch
@@ -208,7 +210,7 @@ class StakeholderDashboardPage(QWidget):
         bl.addSpacing(16)
 
         bl.addWidget(QLabel("Scope:"))
-        self._scope_combo = QComboBox()
+        self._scope_combo = ArrowComboBox()
         self._populate_scope()
         self._scope_combo.setStyleSheet(f"""
             QComboBox {{ padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;

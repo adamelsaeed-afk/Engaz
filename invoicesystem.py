@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QAbstractItemView, QDialog, QDialogButtonBox, QTextEdit,
     QStylePainter, QStyleOptionComboBox, QStyle, QDateEdit, QCheckBox,
 )
-from PySide6.QtCore import Qt, Signal, QPoint, QDate
+from PySide6.QtCore import Qt, Signal, QPoint, QDate, QTimer, QEvent
 from PySide6.QtGui import QColor, QPalette, QPainter
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
@@ -68,6 +68,40 @@ class ArrowComboBox(QComboBox):
         arrow_rect = self.rect().adjusted(self.rect().width() - 24, 0, -6, 0)
         painter.setPen(self.palette().color(QPalette.Text))
         painter.drawText(arrow_rect, Qt.AlignCenter, "▼")
+
+
+class LeftAlignedDateEdit(QDateEdit):
+    """QDateEdit whose calendar popup opens aligned to the left of the widget."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCalendarPopup(True)
+        cal = self.calendarWidget()
+        if cal:
+            cal.installEventFilter(self)
+        self._retry_count = 0
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Show:
+            self._retry_count = 0
+            QTimer.singleShot(0, self._reposition_calendar)
+        return super().eventFilter(obj, event)
+
+    def _reposition_calendar(self):
+        cal = self.calendarWidget()
+        if not cal:
+            return
+        w = cal.window()
+        if not w or not w.isVisible() or w is self.window():
+            return
+        global_pos = self.mapToGlobal(self.rect().bottomLeft())
+        target_x = global_pos.x() - w.width() + self.width()
+        target_y = global_pos.y()
+        if w.x() != target_x or w.y() != target_y:
+            w.move(target_x, target_y)
+        if self._retry_count < 30:
+            self._retry_count += 1
+            QTimer.singleShot(50, self._reposition_calendar)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -916,6 +950,8 @@ class _ErrorLabel(QLabel):
 class StatCard(QFrame):
     """Reusable dashboard stat card."""
 
+    clicked = Signal()
+
     def __init__(self, title, value, color=TEXT_DARK, parent=None):
         super().__init__(parent)
         self.setFixedHeight(110)
@@ -932,12 +968,27 @@ class StatCard(QFrame):
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(4)
         self.title_lbl = QLabel(title)
-        self.title_lbl.setStyleSheet(f"color: {TEXT_GRAY}; font-size: 13px; border: none;")
+        self.title_lbl.setStyleSheet(f"color: {TEXT_GRAY}; font-size: 13px; border: none; background: transparent;")
+        self.title_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.value_lbl = QLabel(str(value))
-        self.value_lbl.setStyleSheet(f"color: {color}; font-size: 28px; font-weight: bold; border: none;")
+        self.value_lbl.setStyleSheet(f"color: {color}; font-size: 28px; font-weight: bold; border: none; background: transparent;")
+        self.value_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.title_lbl)
         layout.addStretch()
         layout.addWidget(self.value_lbl)
+        self._hover = False
+        self._card_bg = CARD_BG
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.setStyleSheet(f"StatCard {{ background-color: #F8FAFC; border: 2px solid {STEEL}; border-radius: 10px; }}")
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.setStyleSheet(f"StatCard {{ background-color: {CARD_BG}; border: 1px solid {BORDER}; border-radius: 10px; }}")
 
     def set_value(self, value):
         self.value_lbl.setText(str(value))
@@ -1091,22 +1142,22 @@ class Sidebar(QFrame):
     MENUS = {
         "lawyer": [
             ("🏠  Main Menu", "🏠", PAGE_DASHBOARD),
-            ("📁  Cases", "📁", PAGE_CASES),
-            ("📅  Calendar", "📅", PAGE_CALENDAR),
-            ("💳  Invoices", "💳", PAGE_INVOICES),
+            ("📜  Cases", "📜", PAGE_CASES),
+            ("🗓️  Calendar", "🗓️", PAGE_CALENDAR),
+            ("🧾  Invoices", "🧾", PAGE_INVOICES),
             ("💬  Messages", "💬", PAGE_MESSAGES),
             ("📈  Reports", "📈", PAGE_REPORTS),
-            ("📚  References", "📚", PAGE_LAW_LIBRARY),
+            ("📖  References", "📖", PAGE_LAW_LIBRARY),
         ],
         "client": [
             ("🏠  Main Menu", "🏠", PAGE_DASHBOARD),
-            ("📁  My Cases", "📁", PAGE_CASES),
-            ("📅  Appointments", "📅", PAGE_CALENDAR),
-            ("💳  Invoices", "💳", PAGE_INVOICES),
+            ("📜  My Cases", "📜", PAGE_CASES),
+            ("🗓️  Appointments", "🗓️", PAGE_CALENDAR),
+            ("🧾  Invoices", "🧾", PAGE_INVOICES),
             ("💬  Messages", "💬", PAGE_MESSAGES),
         ],
         "stakeholder": [
-            ("📊  Dashboard", "📊", PAGE_STAKEHOLDER_DASHBOARD),
+            ("📈  Dashboard", "📈", PAGE_STAKEHOLDER_DASHBOARD),
         ],
     }
 
@@ -1406,6 +1457,8 @@ class HeaderBar(QFrame):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class DashboardPage(QWidget):
+    appointment_clicked = Signal(str)
+
     def __init__(self, repo, user, parent=None):
         super().__init__(parent)
         self._repo = repo
@@ -1487,6 +1540,8 @@ class DashboardPage(QWidget):
         cards.setSpacing(16)
         c1 = StatCard("Active Cases", self._repo.count_active_cases_for_lawyer(uid))
         c2 = StatCard("Pending Appointments", self._repo.count_pending_appointments_for_lawyer(uid))
+        c2.setCursor(Qt.PointingHandCursor)
+        c2.clicked.connect(lambda: self.appointment_clicked.emit(datetime.now().strftime("%Y-%m-%d")))
         c3 = StatCard("Pending Invoices", self._repo.count_unpaid_invoices(), AMBER)
         c4 = StatCard("Unread Notifications", self._repo.unread_notification_count(uid), RED)
         self._stat_cards = [c1, c2, c3, c4]
@@ -1540,6 +1595,10 @@ class DashboardPage(QWidget):
 
     def _make_appointment_card(self, appt):
         frame = QFrame()
+        frame.setCursor(Qt.PointingHandCursor)
+        frame.setProperty("appt_date", appt["date"])
+        frame.setProperty("hover", False)
+        frame.installEventFilter(self)
         frame.setStyleSheet(f"background-color: {CARD_BG}; border: 1px solid {BORDER};"
                             f" border-radius: 8px; padding: 10px; margin-bottom: 4px;")
         shadow = QGraphicsDropShadowEffect()
@@ -1551,16 +1610,39 @@ class DashboardPage(QWidget):
         layout.setContentsMargins(14, 10, 14, 10)
         info = QVBoxLayout()
         title = QLabel(appt["title"])
-        title.setStyleSheet(f"font-weight: bold; color: {TEXT_DARK}; font-size: 13px; border: none;")
+        title.setStyleSheet(f"font-weight: bold; color: {TEXT_DARK}; font-size: 13px; border: none; background: transparent;")
+        title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         date_str = f"{appt['date']}  {appt.get('start_time', '')}  ({appt.get('duration_minutes', 0)} min)"
         detail = QLabel(date_str)
-        detail.setStyleSheet(f"color: {TEXT_GRAY}; font-size: 12px; border: none;")
+        detail.setStyleSheet(f"color: {TEXT_GRAY}; font-size: 12px; border: none; background: transparent;")
+        detail.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         info.addWidget(title)
         info.addWidget(detail)
         layout.addLayout(info)
         layout.addStretch()
-        layout.addWidget(_status_badge(appt.get("status", "")))
+        badge = _status_badge(appt.get("status", ""))
+        badge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(badge)
         return frame
+
+    def eventFilter(self, obj, event):
+        if isinstance(obj, QFrame) and obj.property("appt_date"):
+            if event.type() == QEvent.Type.Enter:
+                obj.setProperty("hover", True)
+                obj.setStyleSheet(f"background-color: #F8FAFC; border: 2px solid {STEEL};"
+                                  f" border-radius: 8px; padding: 9px; margin-bottom: 4px;")
+                return True
+            elif event.type() == QEvent.Type.Leave:
+                obj.setProperty("hover", False)
+                obj.setStyleSheet(f"background-color: {CARD_BG}; border: 1px solid {BORDER};"
+                                  f" border-radius: 8px; padding: 10px; margin-bottom: 4px;")
+                return True
+            elif event.type() == QEvent.Type.MouseButtonPress:
+                date_str = obj.property("appt_date")
+                if date_str:
+                    self.appointment_clicked.emit(date_str)
+                return True
+        return super().eventFilter(obj, event)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1653,8 +1735,7 @@ class CaseForm(QDialog):
         label = self._label("Case Date")
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         grid.addWidget(label, r, 0)
-        self._case_date_input = QDateEdit()
-        self._case_date_input.setCalendarPopup(True)
+        self._case_date_input = LeftAlignedDateEdit()
         self._case_date_input.setDate(QDate.currentDate())
         self._case_date_input.setStyleSheet(self._field_style())
         grid.addWidget(self._case_date_input, r, 1)
@@ -1717,18 +1798,6 @@ class CaseForm(QDialog):
             border: 1px solid {BORDER};
             background: #f0f0f0;
             color: {TEXT_DARK};
-            }}
-            QComboBox::drop-down {{
-            border: 0px;
-            background: transparent;
-            padding: 0px 4px;
-            }}
-            QComboBox::down-arrow {{
-            image: none;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 5px solid {TEXT_GRAY};
-            margin-right: 2px;
             }}
             QComboBox:focus, QLineEdit:focus, QTextEdit:focus {{
             border: 1px solid {BORDER};
@@ -1895,18 +1964,6 @@ class Casepagemain(QWidget):
             QComboBox:focus {{
                 border-color: {STEEL};
             }}
-            QComboBox::drop-down {{
-                border: 0px;
-                background: transparent;
-                padding: 0px;
-            }}
-            QComboBox::down-arrow {{
-                width: 0px;
-                height: 0px;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 6px solid {TEXT_GRAY};
-            }}
         """)
         self._status_filter.currentTextChanged.connect(self._on_filter_changed)
         bar.addWidget(self._status_filter)
@@ -1931,18 +1988,6 @@ class Casepagemain(QWidget):
             }}
             QComboBox:focus {{
                 border-color: {STEEL};
-            }}
-            QComboBox::drop-down {{
-                border: 0px;
-                background: transparent;
-                padding: 0px;
-            }}
-            QComboBox::down-arrow {{
-                width: 0px;
-                height: 0px;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 6px solid {TEXT_GRAY};
             }}
         """)
         self._type_filter.currentTextChanged.connect(self._on_filter_changed)
@@ -2235,6 +2280,18 @@ class MonthCalendar(QFrame):
     def set_appointment_dates(self, dates):
         self._appt_dates = set(dates)
         self._render()
+
+    def set_month(self, year, month):
+        self._year = int(year)
+        self._month = int(month)
+        self._render()
+
+    def select_day(self, day):
+        day = int(day)
+        date_str = f"{self._year}-{self._month:02d}-{day:02d}"
+        self._selected = date_str
+        self._render()
+        self.date_selected.emit(date_str)
 
     def selected_date(self):
         return self._selected
@@ -2539,7 +2596,7 @@ class CalendarPage(QWidget):
             empty_layout.setAlignment(Qt.AlignCenter)
             empty_layout.setContentsMargins(24, 40, 24, 40)
             empty_layout.setSpacing(8)
-            icon_lbl = QLabel("📅")
+            icon_lbl = QLabel("🗓️")
             icon_lbl.setAlignment(Qt.AlignCenter)
             icon_lbl.setStyleSheet(f"font-size: 28px; border: none; background: transparent;")
             empty_layout.addWidget(icon_lbl)
@@ -2554,6 +2611,17 @@ class CalendarPage(QWidget):
             for a in appts:
                 self._appt_layout.addWidget(self._appointment_card(a))
         self._appt_layout.addStretch()
+
+    def navigate_to_date(self, date_str):
+        date = QDate.fromString(date_str, "yyyy-MM-dd")
+        if not date.isValid():
+            return
+        self._calendar.set_month(date.year(), date.month())
+        self._calendar.select_day(date.day())
+        self._on_date_selected(date_str)
+
+    def refresh(self):
+        self._refresh_all()
 
     def _appointment_card(self, appt):
         frame = QFrame()
@@ -2862,8 +2930,7 @@ class InvoiceFormDialog(QDialog):
         r += 1
 
         grid.addWidget(self._lbl("* Due Date:"), r, 0)
-        self._due = QDateEdit()
-        self._due.setCalendarPopup(True)
+        self._due = LeftAlignedDateEdit()
         self._due.setDate(QDate.currentDate().addDays(30))
         self._due.setStyleSheet(self._fs())
         grid.addWidget(self._due, r, 1)
@@ -3371,6 +3438,8 @@ class MainWindow(QWidget):
             self._pages.addWidget(StakeholderDashboardPage(self._repo, self._user))
         else:
             self._pages.addWidget(DashboardPage(self._repo, self._user))
+            dashboard = self._pages.widget(PAGE_DASHBOARD)
+            dashboard.appointment_clicked.connect(self._on_appointment_clicked)
             self._pages.addWidget(Casepagemain(self._repo, self._user))
             self._pages.addWidget(CalendarPage(self._repo, self._user))
             self._pages.addWidget(InvoicesPage(self._repo, self._user))
@@ -3402,6 +3471,13 @@ class MainWindow(QWidget):
         if hasattr(page_widget, "refresh"):
             page_widget.refresh()
         self._header.refresh_badge()
+
+    def _on_appointment_clicked(self, date_str):
+        cal_page = self._pages.widget(PAGE_CALENDAR)
+        if cal_page and hasattr(cal_page, "navigate_to_date"):
+            self._pages.setCurrentIndex(PAGE_CALENDAR)
+            cal_page.navigate_to_date(date_str)
+            self._header.refresh_badge()
 
     def _handle_reset(self):
         self._repo.reset_to_defaults()

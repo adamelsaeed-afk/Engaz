@@ -1,5 +1,3 @@
-import csv
-import io
 import os
 import tempfile
 from collections import defaultdict
@@ -32,6 +30,8 @@ from engaz_constants import (
     NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
     GREEN, AMBER, RED, BORDER, clear_layout,
 )
+
+from invoicesystem import ArrowComboBox, LeftAlignedDateEdit
 
 PALETTE = [NAVY, STEEL, GREEN, AMBER, RED, "#8B5CF6", "#EC4899"]
 
@@ -180,7 +180,7 @@ class _ChartPanel(QFrame):
         header.addWidget(title_lbl)
 
         types = CHART_TYPES.get(metric_key, ["Bar"])
-        self._type_combo = QComboBox()
+        self._type_combo = ArrowComboBox()
         self._type_combo.addItems(types)
         self._type_combo.setCurrentText(DEFAULT_CHARTS.get(metric_key, types[0]))
         self._type_combo.setStyleSheet(f"""
@@ -279,7 +279,7 @@ class LawyerReportsPage(QWidget):
         bar_layout.addWidget(heading)
         bar_layout.addSpacing(16)
 
-        self._range_combo = QComboBox()
+        self._range_combo = ArrowComboBox()
         self._range_combo.addItems(["Last 30 days", "Last 90 days", "Last year", "All time", "Custom"])
         self._range_combo.setStyleSheet(f"""
             QComboBox {{ padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;
@@ -289,15 +289,13 @@ class LawyerReportsPage(QWidget):
         bar_layout.addWidget(QLabel("Period:"))
         bar_layout.addWidget(self._range_combo)
 
-        self._from_date = QDateEdit()
-        self._from_date.setCalendarPopup(True)
+        self._from_date = LeftAlignedDateEdit()
         self._from_date.setDate(QDate.currentDate().addMonths(-1))
         self._from_date.setStyleSheet(f"padding: 3px 6px; border: 1px solid {BORDER}; border-radius: 4px; font-size: 12px;")
         self._from_date.setVisible(False)
         bar_layout.addWidget(self._from_date)
 
-        self._to_date = QDateEdit()
-        self._to_date.setCalendarPopup(True)
+        self._to_date = LeftAlignedDateEdit()
         self._to_date.setDate(QDate.currentDate())
         self._to_date.setStyleSheet(f"padding: 3px 6px; border: 1px solid {BORDER}; border-radius: 4px; font-size: 12px;")
         self._to_date.setVisible(False)
@@ -305,7 +303,7 @@ class LawyerReportsPage(QWidget):
 
         bar_layout.addSpacing(8)
         bar_layout.addWidget(QLabel("Type:"))
-        self._type_combo = QComboBox()
+        self._type_combo = ArrowComboBox()
         self._type_combo.addItems(["All", "criminal", "civil", "corporate", "family"])
         self._type_combo.setStyleSheet(f"""
             QComboBox {{ padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;
@@ -316,29 +314,14 @@ class LawyerReportsPage(QWidget):
 
         bar_layout.addStretch()
 
-        cases_csv_btn = QPushButton("Export Cases CSV")
-        cases_csv_btn.setStyleSheet(f"QPushButton {{ background: transparent; color: {STEEL};"
-                                    f" border: 1px solid {STEEL}; border-radius: 4px;"
-                                    f" padding: 6px 12px; font-size: 11px; font-weight: bold; }}"
-                                    f"QPushButton:hover {{ background: {STEEL}; color: {WHITE}; }}")
-        cases_csv_btn.clicked.connect(self._export_cases_csv)
-        bar_layout.addWidget(cases_csv_btn)
-
-        cases_pdf_btn = QPushButton("Export Cases PDF")
+        cases_pdf_btn = QPushButton("Export Cases")
         cases_pdf_btn.setStyleSheet(f"QPushButton {{ background: {STEEL}; color: {WHITE}; border: none;"
                                     f" border-radius: 4px; padding: 6px 12px; font-size: 11px; font-weight: bold; }}"
                                     f"QPushButton:hover {{ background: {NAVY}; }}")
         cases_pdf_btn.clicked.connect(self._export_cases_pdf)
         bar_layout.addWidget(cases_pdf_btn)
 
-        csv_btn = QPushButton("Export Stats CSV")
-        csv_btn.setStyleSheet(f"QPushButton {{ background: transparent; color: {GREEN}; border: 1px solid {GREEN};"
-                              f" border-radius: 4px; padding: 6px 12px; font-size: 11px; font-weight: bold; }}"
-                              f"QPushButton:hover {{ background: {GREEN}; color: {WHITE}; }}")
-        csv_btn.clicked.connect(self._export_csv)
-        bar_layout.addWidget(csv_btn)
-
-        pdf_btn = QPushButton("Export Stats PDF")
+        pdf_btn = QPushButton("Export Stats")
         pdf_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
                               f" border-radius: 4px; padding: 6px 12px; font-size: 11px; font-weight: bold; }}"
                               f"QPushButton:hover {{ background: {STEEL}; }}")
@@ -519,7 +502,7 @@ class LawyerReportsPage(QWidget):
             ch_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_DARK}; border: none;")
             ch_header.addWidget(ch_title)
             types = CHART_TYPES.get(metric_key, ["Bar"])
-            ch_combo = QComboBox()
+            ch_combo = ArrowComboBox()
             ch_combo.addItems(types)
             ch_combo.setCurrentText(panel.chart_type())
             ch_combo.setStyleSheet(f"""
@@ -562,21 +545,6 @@ class LawyerReportsPage(QWidget):
         panel.expand_requested.connect(show_expanded)
         refresh_chart(panel.chart_type())
         self._content_layout.addWidget(panel)
-
-    def _export_csv(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export Stats CSV", "report_stats.csv", "CSV Files (*.csv)"
-        )
-        if not path:
-            return
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["Metric", "Value"])
-        for _card, title, value in self._stat_cards:
-            writer.writerow([title, value])
-        writer.writerow([])
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            f.write(output.getvalue())
 
     def _export_pdf(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -627,31 +595,6 @@ class LawyerReportsPage(QWidget):
                 styles["Italic"],
             ))
             doc.build(elements)
-
-    def _export_cases_csv(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export All Cases CSV", "all_cases.csv", "CSV Files (*.csv)"
-        )
-        if not path:
-            return
-        uid = self._user["user_id"]
-        all_cases = self._repo.get_cases_for_lawyer(uid)
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["Case #", "Title", "Type", "Status", "Client", "Date Created"])
-        for case in all_cases:
-            client = self._repo.get_user(case.get("client_id", ""))
-            client_name = f"{client['first_name']} {client['last_name']}" if client else "—"
-            writer.writerow([
-                case.get("case_number", ""),
-                case.get("title", ""),
-                case.get("case_type", ""),
-                case.get("status", ""),
-                client_name,
-                (case.get("created_at", "")[:10]) if case.get("created_at") else "",
-            ])
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            f.write(output.getvalue())
 
     def _export_cases_pdf(self):
         path, _ = QFileDialog.getSaveFileName(
