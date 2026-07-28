@@ -13,12 +13,12 @@ from datetime import datetime, timedelta
 from PySide6.QtWidgets import (
     QApplication, QWidget, QFrame, QStackedWidget,
     QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit, QPushButton,
-    QMessageBox, QScrollArea, QComboBox, QListView, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QDialog, QDialogButtonBox, QTextEdit,
-    QStylePainter, QStyleOptionComboBox, QStyle, QDateEdit, QCheckBox,
+    QMessageBox, QScrollArea, QComboBox, QTableWidget, QTableWidgetItem,
+    QHeaderView, QAbstractItemView, QDialog, QTextEdit,
+    QDateEdit, QCheckBox,
 )
 from PySide6.QtCore import Qt, Signal, QPoint, QDate, QTimer, QEvent
-from PySide6.QtGui import QColor, QPalette, QPainter
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 
 from engaz_constants import (
@@ -27,6 +27,8 @@ from engaz_constants import (
     PAGE_DASHBOARD, PAGE_CASES, PAGE_CALENDAR, PAGE_INVOICES,
     PAGE_MESSAGES, PAGE_REPORTS, PAGE_LAW_LIBRARY, PAGE_STAKEHOLDER_DASHBOARD,
     NOTIFICATION_PAGE, _status_badge, clear_layout, _client_display_name,
+    ArrowComboBox, GLOBAL_QSS, BTN_PRIMARY_HOVER, BTN_SECONDARY_HOVER,
+    BTN_DESTRUCTIVE_HOVER, create_required_label,
 )
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engaz_data.json")
@@ -49,42 +51,6 @@ def verify_password(password: str, stored_hash: str, salt: str) -> bool:
 def _minutes_since_midnight(time_str):
     parts = time_str.split(":")
     return int(parts[0]) * 60 + int(parts[1])
-
-
-class ArrowComboBox(QComboBox):
-    """Combo box with a reliable text-based down-arrow."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setEditable(False)
-        self.setInsertPolicy(QComboBox.NoInsert)
-        self.setView(QListView())
-        self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet("""
-            QComboBox::drop-down { border: none; background: transparent; }
-            QComboBox::down-arrow { image: none; }
-        """)
-
-    def paintEvent(self, event):
-        """Custom paint event to draw the combo box with a text-based arrow."""
-        painter = QStylePainter(self)
-        option = QStyleOptionComboBox()
-        self.initStyleOption(option)
-        option.subControls = QStyle.SC_ComboBoxFrame
-        painter.drawComplexControl(QStyle.CC_ComboBox, option)
-
-        text_rect = self.rect().adjusted(8, 0, -24, 0)
-        painter.drawItemText(
-            text_rect,
-            Qt.AlignVCenter | Qt.AlignLeft,
-            self.palette(),
-            self.isEnabled(),
-            self.currentText(),
-        )
-
-        arrow_rect = self.rect().adjusted(self.rect().width() - 24, 0, -6, 0)
-        painter.setPen(self.palette().color(QPalette.Text))
-        painter.drawText(arrow_rect, Qt.AlignCenter, "▼")
 
 
 class LeftAlignedDateEdit(QDateEdit):
@@ -1873,6 +1839,7 @@ class CaseForm(QDialog):
         r = 0
         grid.addWidget(self._required_label("Title"), r, 0)
         self._title_input = QLineEdit()
+        self._title_input.setPlaceholderText("Please enter a case title")
         self._title_input.setStyleSheet(self._field_style())
         grid.addWidget(self._title_input, r, 1)
         self._title_error = _ErrorLabel()
@@ -1890,27 +1857,21 @@ class CaseForm(QDialog):
         r += 1
 
         grid.addWidget(self._required_label("Case Type"), r, 0)
-        self._type_input = ArrowComboBox()
+        self._type_input = ArrowComboBox(placeholder="Select case type...")
         self._type_input.addItems(["criminal", "civil", "corporate", "family"])
         self._type_input.setStyleSheet(self._field_style())
-        self._type_input.setEditable(False)
-        self._type_input.setView(QListView())
-        self._type_input.setInsertPolicy(QComboBox.NoInsert)
         grid.addWidget(self._type_input, r, 1)
         self._type_error = _ErrorLabel()
         grid.addWidget(self._type_error, r, 2)
         r += 1
 
         grid.addWidget(self._required_label("Client"), r, 0)
-        self._client_input = ArrowComboBox()
+        self._client_input = ArrowComboBox(placeholder="Select client...")
         for client in self._repo.get_all_clients():
             self._client_input.addItem(
                 _client_display_name(client), client["user_id"]
             )
         self._client_input.setStyleSheet(self._field_style())
-        self._client_input.setEditable(False)
-        self._client_input.setView(QListView())
-        self._client_input.setInsertPolicy(QComboBox.NoInsert)
         grid.addWidget(self._client_input, r, 1)
         self._client_error = _ErrorLabel()
         grid.addWidget(self._client_error, r, 2)
@@ -1919,12 +1880,9 @@ class CaseForm(QDialog):
         label = self._label("Status")
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         grid.addWidget(label, r, 0)
-        self._status_input = ArrowComboBox()
+        self._status_input = ArrowComboBox(placeholder="Select status...")
         self._status_input.addItems(["Open", "In Progress", "On Hold", "Closed", "Won", "Lost"])
         self._status_input.setStyleSheet(self._field_style())
-        self._status_input.setEditable(False)
-        self._status_input.setView(QListView())
-        self._status_input.setInsertPolicy(QComboBox.NoInsert)
         grid.addWidget(self._status_input, r, 1)
         r += 1
 
@@ -1939,6 +1897,7 @@ class CaseForm(QDialog):
 
         grid.addWidget(self._required_label("Court"), r, 0)
         self._court_input = QLineEdit()
+        self._court_input.setPlaceholderText("Please enter a court")
         self._court_input.setStyleSheet(self._field_style())
         grid.addWidget(self._court_input, r, 1)
         self._court_error = _ErrorLabel()
@@ -1947,6 +1906,7 @@ class CaseForm(QDialog):
 
         grid.addWidget(self._required_label("Opposing Party"), r, 0)
         self._opposing_party_input = QLineEdit()
+        self._opposing_party_input.setPlaceholderText("Please enter an opposing party")
         self._opposing_party_input.setStyleSheet(self._field_style())
         grid.addWidget(self._opposing_party_input, r, 1)
         self._opposing_party_error = _ErrorLabel()
@@ -1970,41 +1930,30 @@ class CaseForm(QDialog):
         btn_layout.addStretch()
         if self._is_edit and self._case:
             delete_btn = QPushButton("Delete Case")
-            delete_btn.setStyleSheet(f"QPushButton {{ background: transparent; color: {RED}; border: 1px solid {RED};"
-                                     f" border-radius: 4px; padding: 8px 16px; font-size: 13px; }}"
-                                     f"QPushButton:hover {{ background: {RED}; color: {WHITE}; }}")
+            delete_btn.setStyleSheet(BTN_DESTRUCTIVE_HOVER)
             delete_btn.clicked.connect(self._delete_case)
             btn_layout.addWidget(delete_btn)
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet(self._btn_style(secondary=True))
+        cancel_btn.setStyleSheet(BTN_SECONDARY_HOVER)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
         save_btn = QPushButton("Save Case")
-        save_btn.setStyleSheet(self._btn_style(secondary=False))
+        save_btn.setStyleSheet(BTN_PRIMARY_HOVER)
         save_btn.clicked.connect(self._try_save)
         btn_layout.addWidget(save_btn)
         layout.addLayout(btn_layout)
 
     def _required_label(self, text):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-        label = self._label(text)
-        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        layout.addWidget(label)
-        layout.addWidget(self._required_mark("*"))
-        return container
+        lbl = QLabel(create_required_label(text))
+        lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none; background: transparent;")
+        lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        return lbl
 
     def _label(self, text):
         lbl = QLabel(text)
         lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none; background: transparent;")
         return lbl
 
-    def _required_mark(self, text):
-        lbl = QLabel(text)
-        lbl.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {RED}; border: none; background: transparent;")
-        return lbl
     def _field_style(self):
         return f"""
             QComboBox, QLineEdit, QTextEdit {{
@@ -2045,19 +1994,6 @@ class CaseForm(QDialog):
             background: {STEEL};
             color: {WHITE};
             }}
-        """
-
-    def _btn_style(self, secondary):
-        if secondary:
-            return f"""
-                QPushButton {{ background: transparent; color: {NAVY}; border: 1px solid {NAVY};
-                               border-radius: 4px; padding: 8px 20px; font-size: 13px; }}
-                QPushButton:hover {{ background: {NAVY}; color: {WHITE}; }}
-            """
-        return f"""
-            QPushButton {{ background: {NAVY}; color: {WHITE}; border: none; border-radius: 4px;
-                           padding: 8px 20px; font-size: 13px; font-weight: bold; }}
-            QPushButton:hover {{ background: {STEEL}; }}
         """
 
     def _fill_form(self):
@@ -2181,64 +2117,22 @@ class Casepagemain(QWidget):
         self._search.textChanged.connect(self._on_filter_changed)
         bar.addWidget(self._search)
 
-        self._status_filter = ArrowComboBox()
+        self._status_filter = ArrowComboBox(placeholder="All Status")
         self._status_filter.addItems(["All Status", "Open", "In Progress", "On Hold", "Closed", "Won", "Lost"])
-        self._status_filter.setEditable(False)
-        self._status_filter.setView(QListView())
-        self._status_filter.setInsertPolicy(QComboBox.NoInsert)
-        self._status_filter.setStyleSheet(f"""
-            QComboBox {{
-                padding: 4px 8px;
-                border: 1px solid {BORDER};
-                border-radius: 4px;
-                color: {TEXT_DARK};
-                background: {WHITE};
-            }}
-            QComboBox:hover {{
-                border: 1px solid {BORDER};
-                background: {WHITE};
-                color: {TEXT_DARK};
-            }}
-            QComboBox:focus {{
-                border-color: {STEEL};
-            }}
-        """)
+        self._status_filter.setStyleSheet(GLOBAL_QSS)
         self._status_filter.currentTextChanged.connect(self._on_filter_changed)
         bar.addWidget(self._status_filter)
 
-        self._type_filter = ArrowComboBox()
+        self._type_filter = ArrowComboBox(placeholder="All Types")
         self._type_filter.addItems(["All Types", "criminal", "civil", "corporate", "family"])
-        self._type_filter.setEditable(False)
-        self._type_filter.setView(QListView())
-        self._type_filter.setInsertPolicy(QComboBox.NoInsert)
-        self._type_filter.setStyleSheet(f"""
-            QComboBox {{
-                padding: 4px 8px;
-                border: 1px solid {BORDER};
-                border-radius: 4px;
-                color: {TEXT_DARK};
-                background: {WHITE};
-            }}
-            QComboBox:hover {{
-                border: 1px solid {BORDER};
-                background: {WHITE};
-                color: {TEXT_DARK};
-            }}
-            QComboBox:focus {{
-                border-color: {STEEL};
-            }}
-        """)
+        self._type_filter.setStyleSheet(GLOBAL_QSS)
         self._type_filter.currentTextChanged.connect(self._on_filter_changed)
         bar.addWidget(self._type_filter)
 
         bar.addStretch()
 
         new_btn = QPushButton("+ New Case")
-        new_btn.setStyleSheet(f"""
-            QPushButton {{ background: {NAVY}; color: {WHITE}; border: none; border-radius: 4px;
-                           padding: 8px 18px; font-size: 13px; font-weight: bold; }}
-            QPushButton:hover {{ background: {STEEL}; }}
-        """)
+        new_btn.setStyleSheet(BTN_PRIMARY_HOVER)
         new_btn.clicked.connect(self._open_create_dialog)
         bar.addWidget(new_btn)
 
@@ -2431,11 +2325,7 @@ class Casepagemain(QWidget):
         layout.addStretch()
 
         close_btn = QPushButton("Close")
-        close_btn.setStyleSheet(f"""
-            QPushButton {{ background: transparent; color: {NAVY}; border: 1px solid {NAVY};
-                           border-radius: 4px; padding: 8px 20px; font-size: 13px; }}
-            QPushButton:hover {{ background: {NAVY}; color: {WHITE}; }}
-        """)
+        close_btn.setStyleSheet(BTN_SECONDARY_HOVER)
         close_btn.clicked.connect(dlg.accept)
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -2619,13 +2509,14 @@ class AppointmentDialog(QDialog):
         r = 0
         grid.addWidget(self._required_label("Title:"), r, 0)
         self._title = QLineEdit()
+        self._title.setPlaceholderText("Please enter an appointment title")
         self._title.setStyleSheet(self._fs())
         grid.addWidget(self._title, r, 1)
         r += 1
 
         if not self._is_lawyer:
             grid.addWidget(self._required_label("Lawyer:"), r, 0)
-            self._lawyer = ArrowComboBox()
+            self._lawyer = ArrowComboBox(placeholder="Select lawyer...")
             for law in self._repo.get_all_lawyers():
                 self._lawyer.addItem(f"{law['first_name']} {law['last_name']}", law["user_id"])
             self._lawyer.setStyleSheet(self._fs())
@@ -2634,7 +2525,7 @@ class AppointmentDialog(QDialog):
             r += 1
 
         grid.addWidget(self._lbl("Case:"), r, 0)
-        self._case = ArrowComboBox()
+        self._case = ArrowComboBox(placeholder="Select case...")
         self._case.addItem("None", "")
         for c in (self._repo.get_cases_for_client(self._user["user_id"])
                   if not self._is_lawyer else self._repo.get_cases_for_lawyer(self._user["user_id"])):
@@ -2644,12 +2535,9 @@ class AppointmentDialog(QDialog):
         r += 1
 
         grid.addWidget(self._lbl("Meeting Type:"), r, 0)
-        self._meeting_type = ArrowComboBox()
+        self._meeting_type = ArrowComboBox(placeholder="Select meeting type...")
         self._meeting_type.addItems(self.MEETING_TYPES)
         self._meeting_type.setStyleSheet(self._fs())
-        self._meeting_type.setEditable(False)
-        self._meeting_type.setView(QListView())
-        self._meeting_type.setInsertPolicy(QComboBox.NoInsert)
         grid.addWidget(self._meeting_type, r, 1)
         r += 1
 
@@ -2660,7 +2548,7 @@ class AppointmentDialog(QDialog):
         r += 1
 
         grid.addWidget(self._required_label("Time:"), r, 0)
-        self._time = ArrowComboBox()
+        self._time = ArrowComboBox(placeholder="Select time...")
         for h in range(8, 19):
             for m in (0, 30):
                 self._time.addItem(f"{h:02d}:{m:02d}")
@@ -2669,7 +2557,7 @@ class AppointmentDialog(QDialog):
         r += 1
 
         grid.addWidget(self._lbl("Duration:"), r, 0)
-        self._duration = ArrowComboBox()
+        self._duration = ArrowComboBox(placeholder="Select duration...")
         for mins in (30, 45, 60, 90, 120):
             self._duration.addItem(f"{mins} min", mins)
         self._duration.setCurrentIndex(2)
@@ -2692,15 +2580,11 @@ class AppointmentDialog(QDialog):
         btns = QHBoxLayout()
         btns.addStretch()
         cancel = QPushButton("Cancel")
-        cancel.setStyleSheet(f"QPushButton {{ background: transparent; color: {NAVY}; border: 1px solid {NAVY};"
-                             f" border-radius: 4px; padding: 8px 20px; font-size: 13px; }}"
-                             f"QPushButton:hover {{ background: {NAVY}; color: {WHITE}; }}")
+        cancel.setStyleSheet(BTN_SECONDARY_HOVER)
         cancel.clicked.connect(self.reject)
         btns.addWidget(cancel)
         save = QPushButton("Save Appointment")
-        save.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none; border-radius: 4px;"
-                           f" padding: 8px 20px; font-size: 13px; font-weight: bold; }}"
-                           f"QPushButton:hover {{ background: {STEEL}; }}")
+        save.setStyleSheet(BTN_PRIMARY_HOVER)
         save.clicked.connect(self._try_save)
         btns.addWidget(save)
         layout.addLayout(btns)
@@ -2721,17 +2605,10 @@ class AppointmentDialog(QDialog):
         return lbl
 
     def _required_label(self, text):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-        label = self._lbl(text)
-        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        layout.addWidget(label)
-        mark = QLabel("*")
-        mark.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {RED}; border: none;")
-        layout.addWidget(mark)
-        return container
+        lbl = QLabel(create_required_label(text))
+        lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;")
+        lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        return lbl
 
     def _fs(self):
         return f"padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px; font-size: 13px; color: {TEXT_DARK}; background: {WHITE};"
@@ -2799,9 +2676,7 @@ class CalendarPage(QWidget):
         header.addStretch()
         if not self._is_lawyer:
             new_btn = QPushButton("+ Request Appointment")
-            new_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
-                                  f" border-radius: 4px; padding: 8px 16px; font-size: 12px; font-weight: bold; }}"
-                                  f"QPushButton:hover {{ background: {STEEL}; }}")
+            new_btn.setStyleSheet(BTN_PRIMARY_HOVER)
             new_btn.clicked.connect(self._open_create)
             header.addWidget(new_btn)
         right.addLayout(header)
@@ -3227,8 +3102,8 @@ class InvoiceFormDialog(QDialog):
         grid.setColumnStretch(1, 1)
 
         r = 0
-        grid.addWidget(self._lbl("* Case:"), r, 0)
-        self._case = ArrowComboBox()
+        grid.addWidget(self._required_lbl("Case:"), r, 0)
+        self._case = ArrowComboBox(placeholder="Select case...")
         for c in self._repo.get_cases_for_lawyer(self._user["user_id"]):
             client = self._repo.get_user(c["client_id"])
             cn = _client_display_name(client)
@@ -3238,8 +3113,9 @@ class InvoiceFormDialog(QDialog):
         grid.addWidget(self._case, r, 1)
         r += 1
 
-        grid.addWidget(self._lbl("* Description:"), r, 0)
+        grid.addWidget(self._required_lbl("Description:"), r, 0)
         self._desc = QLineEdit()
+        self._desc.setPlaceholderText("Please enter a description")
         self._desc.setStyleSheet(self._fs())
         grid.addWidget(self._desc, r, 1)
         r += 1
@@ -3254,7 +3130,7 @@ class InvoiceFormDialog(QDialog):
         grid.addWidget(self._hours_summary, r, 1)
         r += 1
 
-        grid.addWidget(self._lbl("* Amount ($):"), r, 0)
+        grid.addWidget(self._required_lbl("Amount ($):"), r, 0)
         self._amount = QLineEdit()
         self._amount.setStyleSheet(self._fs())
         grid.addWidget(self._amount, r, 1)
@@ -3272,7 +3148,7 @@ class InvoiceFormDialog(QDialog):
         grid.addLayout(recalc_row, r, 2)
         r += 1
 
-        grid.addWidget(self._lbl("* Due Date:"), r, 0)
+        grid.addWidget(self._required_lbl("Due Date:"), r, 0)
         self._due = LeftAlignedDateEdit()
         self._due.setDate(QDate.currentDate().addDays(30))
         self._due.setStyleSheet(self._fs())
@@ -3280,12 +3156,9 @@ class InvoiceFormDialog(QDialog):
         r += 1
 
         grid.addWidget(self._lbl("Status:"), r, 0)
-        self._status = ArrowComboBox()
+        self._status = ArrowComboBox(placeholder="Select status...")
         self._status.addItems(["Draft", "Sent"])
         self._status.setStyleSheet(self._fs())
-        self._status.setEditable(False)
-        self._status.setView(QListView())
-        self._status.setInsertPolicy(QComboBox.NoInsert)
         grid.addWidget(self._status, r, 1)
         r += 1
 
@@ -3299,15 +3172,11 @@ class InvoiceFormDialog(QDialog):
         btns = QHBoxLayout()
         btns.addStretch()
         cancel = QPushButton("Cancel")
-        cancel.setStyleSheet(f"QPushButton {{ background: transparent; color: {NAVY}; border: 1px solid {NAVY};"
-                             f" border-radius: 4px; padding: 8px 20px; font-size: 13px; }}"
-                             f"QPushButton:hover {{ background: {NAVY}; color: {WHITE}; }}")
+        cancel.setStyleSheet(BTN_SECONDARY_HOVER)
         cancel.clicked.connect(self.reject)
         btns.addWidget(cancel)
         save = QPushButton("Create Invoice")
-        save.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none; border-radius: 4px;"
-                           f" padding: 8px 20px; font-size: 13px; font-weight: bold; }}"
-                           f"QPushButton:hover {{ background: {STEEL}; }}")
+        save.setStyleSheet(BTN_PRIMARY_HOVER)
         save.clicked.connect(self._try_save)
         btns.addWidget(save)
         layout.addLayout(btns)
@@ -3342,6 +3211,11 @@ class InvoiceFormDialog(QDialog):
 
     def _lbl(self, text):
         lbl = QLabel(text)
+        lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;")
+        return lbl
+
+    def _required_lbl(self, text):
+        lbl = QLabel(create_required_label(text))
         lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;")
         return lbl
 
@@ -3421,9 +3295,7 @@ class PaymentDialog(QDialog):
         nav.addWidget(self._back_btn)
         nav.addStretch()
         self._next_btn = QPushButton("Next →")
-        self._next_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none; border-radius: 4px;"
-                                     f" padding: 8px 22px; font-size: 13px; font-weight: bold; }}"
-                                     f"QPushButton:hover {{ background: {STEEL}; }}")
+        self._next_btn.setStyleSheet(BTN_PRIMARY_HOVER)
         self._next_btn.clicked.connect(self._go_next)
         nav.addWidget(self._next_btn)
         layout.addLayout(nav)
@@ -3470,29 +3342,27 @@ class PaymentDialog(QDialog):
         grid = QGridLayout()
         grid.setVerticalSpacing(10)
         grid.setHorizontalSpacing(10)
-        grid.addWidget(QLabel("* Card Number:"), 0, 0)
-        grid.itemAt(grid.count() - 1).widget().setStyleSheet(
-            f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;"
-        )
+
+        card_lbl = QLabel(create_required_label("Card Number:"))
+        card_lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;")
+        grid.addWidget(card_lbl, 0, 0)
         self._card_num = QLineEdit()
         self._card_num.setPlaceholderText("1234 5678 9012 3456")
         self._card_num.setStyleSheet(f"padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
         grid.addWidget(self._card_num, 0, 1)
 
-        grid.addWidget(QLabel("* Expiry (MM/YY):"), 1, 0)
-        grid.itemAt(grid.count() - 1).widget().setStyleSheet(
-            f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;"
-        )
+        exp_lbl = QLabel(create_required_label("Expiry (MM/YY):"))
+        exp_lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;")
+        grid.addWidget(exp_lbl, 1, 0)
         self._expiry = QLineEdit()
         self._expiry.setPlaceholderText("MM/YY")
         self._expiry.setFixedWidth(80)
         self._expiry.setStyleSheet(f"padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
         grid.addWidget(self._expiry, 1, 1)
 
-        grid.addWidget(QLabel("* CVV:"), 2, 0)
-        grid.itemAt(grid.count() - 1).widget().setStyleSheet(
-            f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;"
-        )
+        cvv_lbl = QLabel(create_required_label("CVV:"))
+        cvv_lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;")
+        grid.addWidget(cvv_lbl, 2, 0)
         self._cvv = QLineEdit()
         self._cvv.setPlaceholderText("123")
         self._cvv.setEchoMode(QLineEdit.Password)
@@ -3753,9 +3623,7 @@ class InvoicesPage(QWidget):
         header.addStretch()
         if self._is_lawyer:
             new_btn = QPushButton("+ New Invoice")
-            new_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
-                                  f" border-radius: 4px; padding: 8px 18px; font-size: 13px; font-weight: bold; }}"
-                                  f"QPushButton:hover {{ background: {STEEL}; }}")
+            new_btn.setStyleSheet(BTN_PRIMARY_HOVER)
             new_btn.clicked.connect(self._open_create)
             header.addWidget(new_btn)
         export_btn = QPushButton("Export All PDF")
@@ -4119,9 +3987,7 @@ class OTPDialog(QDialog):
         layout.addWidget(self._error)
 
         verify_btn = QPushButton("Verify")
-        verify_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
-                                 f" border-radius: 6px; padding: 10px; font-size: 14px; font-weight: bold; }}"
-                                 f"QPushButton:hover {{ background: {STEEL}; }}")
+        verify_btn.setStyleSheet(BTN_PRIMARY_HOVER)
         verify_btn.clicked.connect(self._verify)
         layout.addWidget(verify_btn)
 
