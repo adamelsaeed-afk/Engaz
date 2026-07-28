@@ -596,12 +596,10 @@ class StakeholderDashboardPage(QWidget):
         fig, ax = _make_figure()
         if sorted_items:
             names = [s["name"] for s in sorted_items]
-            totals = [s["total"] for s in sorted_items]
             completeds = [s["completed"] for s in sorted_items]
             x = range(len(names))
             w = 0.35
-            ax.bar([i - w / 2 for i in x], totals, w, color=STEEL, label="Total", edgecolor="none")
-            ax.bar([i + w / 2 for i in x], completeds, w, color=GREEN, label="Completed", edgecolor="none")
+            ax.bar(x, completeds, w, color=STEEL, label="Completed", edgecolor="none")
             ax.set_xticks(x)
             ax.set_xticklabels(names, rotation=45, ha="right", fontsize=8)
             ax.legend(fontsize=8)

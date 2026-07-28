@@ -16,7 +16,7 @@
   <p align="center">
     An all-in-one, role-based desktop legal management & workflow platform for law firms and legal professionals.
     <br />
-    <a href="https://github.com/adamelsaeed-afk/Engaz"><strong>Explore the docs »</strong></a>
+    <a href="PROJECT_SPECIFICATION.md"><strong>Explore Full Project Specification »</strong></a>
     <br />
     <br />
     <a href="https://github.com/adamelsaeed-afk/Engaz/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
@@ -24,6 +24,12 @@
     <a href="https://github.com/adamelsaeed-afk/Engaz/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
   </p>
 </div>
+
+> [!WARNING]
+> ### ⚠️ Demonstration System Notice & Important Disclaimers
+> **Engaz is strictly a DEMO application created for proof-of-concept testing.**
+> - 🔒 **Security was NOT taken into mind**: Passwords are stored in plain text in `engaz_data.json`, authentication and multi-factor OTP checks are client-side mocks, and file system attachments are accessed directly without access controls or sandboxing.
+> - ⚡ **Atomicity was NOT taken into mind**: Database updates perform whole-file JSON rewrites (`json.dump`) without ACID transactions, database locks, or atomic rollback mechanisms. Concurrent writes or abrupt process crashes can lead to data loss or corruption.
 
 <!-- TABLE OF CONTENTS -->
 <details>
@@ -36,32 +42,34 @@
         <li><a href="#key-features">Key Features</a></li>
       </ul>
     </li>
+    <li><a href="#application-architecture--modules">Application Architecture & Modules</a></li>
     <li>
       <a href="#getting-started">Getting Started</a>
       <ul>
         <li><a href="#prerequisites">Prerequisites</a></li>
         <li><a href="#installation">Installation</a></li>
+        <li><a href="#running-the-application">Running The Application</a></li>
       </ul>
     </li>
-    <li><a href="#usage">Usage</a></li>
+    <li><a href="#demo-accounts">Demo Accounts</a></li>
+    <li><a href="#data-persistence--schema">Data Persistence & Schema</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
     <li><a href="#contributing">Contributing</a></li>
     <li><a href="#license">License</a></li>
     <li><a href="#contact">Contact</a></li>
-    <li><a href="#acknowledgments">Acknowledgments</a></li>
   </ol>
 </details>
 
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-**Engaz (إنجاز)** is a modern desktop legal management system built to streamline workflows for law firms, solo practitioners, and clients. Featuring a rich dark/light UI powered by PySide6 (Qt for Python), Engaz unifies case tracking, client-lawyer communication, conflict-free appointment scheduling, invoice generation, and stakeholder analytics in one desktop application.
+**Engaz (إنجاز)** is a desktop legal management system engineered using Python and PySide6 (Qt for Python). It unifies case lifecycle tracking, client-attorney messaging, conflict-free appointment scheduling, invoice generation with hourly billing caps, searchable legal reference libraries, lawyer performance reporting, and executive firm analytics into a single role-based desktop application.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ### Built With
 
-This project is built using Python and modern GUI libraries:
+This project is built using standard Python and modern desktop GUI libraries:
 
 * [![Python][Python-shield]][Python-url]
 * [![Qt][Qt-shield]][Qt-url]
@@ -71,13 +79,33 @@ This project is built using Python and modern GUI libraries:
 
 ### Key Features
 
-* 🧑‍⚖️ **Multi-Role Dashboards**: Custom viewports tailored for Admins, Lawyers, and Clients.
-* 📁 **Case & File Management**: Comprehensive case lifecycle tracking, status tags, document metadata, and file references.
-* 📅 **Calendar & Appointment Scheduler**: Intelligent meeting scheduling, court date tracking, and automated conflict detection.
-* 💳 **Billing & Invoicing System**: Automatic billing calculations, hourly rate caps, invoice generation, and payment status tracking.
-* 💬 **Client-Lawyer Messaging**: Integrated secure direct messaging channel between clients and their assigned attorneys.
-* 📚 **Legal Reference Library**: Searchable law books, legal statutes, and case law reference repository.
-* 📊 **Analytics & Performance Reports**: Graphical charts for revenue, case distribution, and lawyer performance metrics.
+* 🧑‍⚖️ **Multi-Role Dashboards**: Role-tailored dashboards for Lawyers, Clients, and Firm Stakeholders.
+* 📁 **Case & File Management**: Full case tracking, status tags (`Open`, `In Progress`, `Closed`), document metadata, file sharing toggles (`shared_with_client`), and native desktop file launching.
+* 📅 **Calendar & Appointment Scheduler**: Interactive monthly schedule calendar, intelligent conflict detection preventing overlapping attorney slots, and lawyer approval/decline workflows.
+* 💳 **Billing & Invoicing System**: Automatic billing calculations, hourly rate caps (`max_billable_hours`), tax/discount support, PDF export, and simulated client payment processing.
+* 💬 **Client-Lawyer Messaging**: Direct messaging interface with optional case linking, unread badges, and overdue reply warning indicators (`⚠️`).
+* 📚 **Legal Reference Library**: Searchable law books repository with attached discussion threads, inline page-specific comments, and PDF deep-linking fragment jumps (`#page=X`).
+* 📊 **Lawyer Analytics & Reports**: Seaborn and Matplotlib visual analytics covering case trends, status breakdowns, and appointment stats with ReportLab PDF compilation.
+* 📈 **Executive Stakeholder Dashboard**: Firm-wide dashboard with reorderable metric cards, customizable visibility controls, lawyer ranking charts, revenue metrics, and saved user preferences.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- APPLICATION ARCHITECTURE & MODULES -->
+## Application Architecture & Modules
+
+The Engaz codebase consists of 7 primary core modules:
+
+| Module File | Primary Function & Responsibilities |
+| :--- | :--- |
+| 📄 [`engaz_constants.py`](file:///app/engaz_constants.py) | Shared design system color tokens, page routing index definitions, notification routing maps, status badges (`_status_badge`), and formatting utilities. |
+| 📄 [`invoicesystem.py`](file:///app/invoicesystem.py) | Application entrypoint (`EngazApp`), `DataRepository` (JSON database manager), login screens, mock OTP dialog, application shell/navigation, case management, calendar scheduler, and invoicing engine. |
+| 📄 [`case_files.py`](file:///app/case_files.py) | Case file attachment dialogs, document table views, lawyer file sharing controls (`shared_with_client`), notification triggers, and OS desktop file launch integration. |
+| 📄 [`messaging.py`](file:///app/messaging.py) | Client-lawyer direct messaging dialogs, conversation list with unread counters, overdue reply thread alerts, message bubbles, and case contextual linking. |
+| 📄 [`references.py`](file:///app/references.py) | Legal reference library view, PDF law book importer, book chat threads, page-indexed comment widgets, and PDF page fragment navigation. |
+| 📄 [`lawyer_reports.py`](file:///app/lawyer_reports.py) | Individual lawyer performance reporting, Matplotlib/Seaborn charting panels, period filters (30/90/365 days, custom ranges), and single/multi-page PDF report generation. |
+| 📄 [`stakeholder_dashboard.py`](file:///app/stakeholder_dashboard.py) | Executive firm-wide dashboard, firm closing rates, revenue trends, top lawyer rankings, active workload stats, drag-and-drop metric ordering, and metric toggle preferences. |
+
+For exhaustive module breakdowns and data schema specifications, refer to [**`PROJECT_SPECIFICATION.md`**](file:///app/PROJECT_SPECIFICATION.md).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -119,52 +147,61 @@ Follow these instructions to get a local copy of Engaz up and running.
    ```sh
    pip install PySide6 matplotlib seaborn reportlab
    ```
-5. Launch the application:
-   ```sh
-   python engaz.py
-   ```
+
+### Running The Application
+
+Launch the desktop application using python with the main system file:
+```sh
+python invoicesystem.py
+```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-<!-- USAGE EXAMPLES -->
-## Usage
+<!-- DEMO ACCOUNTS -->
+## Demo Accounts
 
-After launching the app with `python engaz.py`, you will be greeted by the Engaz login screen. You can log in using any of the built-in demo accounts below:
+When starting the application, you can log in using any of the built-in demo credentials below:
 
-### Demo Accounts
-
-| Role | Username | Password | Key Features Accessible |
+| Role | Username | Password | Accessible Features & Dashboards |
 | :--- | :--- | :--- | :--- |
-| 🧑‍⚖️ **Lawyer** | `sarah.jenkins` | `lawyer123` | Case tracking, billing, calendar scheduling, messaging |
-| 👤 **Client** | `john.doe` | `client123` | Personal cases, appointment booking, invoice payments |
-| 📊 **Stakeholder / Admin** | `ahmad.al-rashid` | `stakeholder123` | Firm analytics, revenue reports, metric preferences |
+| 🧑‍⚖️ **Lawyer** | `sarah.jenkins` | `lawyer123` | Case management, lawyer reports, client messaging, invoice creation, file sharing controls |
+| 👤 **Client** | `john.doe` | `client123` | Personal cases view, appointment booking, invoice payments, shared case files, attorney chat |
+| 📊 **Stakeholder / Admin** | `ahmad.al-rashid` | `stakeholder123` | Executive firm analytics, revenue charts, lawyer ranking metrics, dashboard preference customization |
 
-> [!NOTE]
-> All application state is stored locally in `engaz_data.json` and automatically saved when actions are performed.
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<!-- DATA PERSISTENCE & SCHEMA -->
+## Data Persistence & Schema
+
+All application state is stored locally in `engaz_data.json` and automatically saved when operations are performed. The database structure contains 10 primary entity collections:
+- `users`: Account profiles, plain-text passwords, role designations, and dashboard preferences.
+- `cases`: Legal case records, case numbers, client/lawyer mappings, types, and statuses.
+- `appointments`: Booking requests, dates, time slots, statuses, and conflict validation records.
+- `invoices`: Financial records, hourly rates, logged hours, billing caps, tax/discount rates, and payment statuses.
+- `messages`: Direct chat messages exchanged between users with read states and case links.
+- `notifications`: Application notifications mapped to target navigation pages.
+- `case_files`: File attachment metadata, local OS file paths, and client sharing flags.
+- `law_books`: Uploaded law book reference records saved in `law_books/`.
+- `book_comments`: Page-indexed comments and research notes tied to specific law books.
+- `book_chats`: Group discussion messages associated with reference books.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- ROADMAP -->
 ## Roadmap
 
-- [ ] Migration to full SQLite database backend
+- [ ] Security hardening (password hashing with bcrypt/argon2, session tokens)
+- [ ] Database migration to SQLite / PostgreSQL with ACID transaction guarantees
 - [ ] AI-assisted legal document parsing and summarization
 - [ ] Real-time WebSocket notifications for client-lawyer chat
 - [ ] Multi-language support (Arabic & English UI toggle)
-- [ ] Export invoices directly to native PDF documents
-
-See the [open issues](https://github.com/adamelsaeed-afk/Engaz/issues) for a full list of proposed features (and known issues).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- CONTRIBUTING -->
 ## Contributing
 
-Contributions make the open-source community an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
-Don't forget to give the project a star! Thanks again!
-
+Contributions are welcome! If you have suggestions or improvements:
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
 3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
@@ -176,31 +213,7 @@ Don't forget to give the project a star! Thanks again!
 <!-- LICENSE -->
 ## License
 
-Distributed under the MIT License.
-
-```text
-MIT License
-
-Copyright (c) 2026 Adam El-Saeed
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+Distributed under the MIT License. See `LICENSE` for more information.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -210,17 +223,6 @@ SOFTWARE.
 Adam El-Saeed - [@adamelsaeed-afk](https://github.com/adamelsaeed-afk)
 
 Project Link: [https://github.com/adamelsaeed-afk/Engaz](https://github.com/adamelsaeed-afk/Engaz)
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- ACKNOWLEDGMENTS -->
-## Acknowledgments
-
-* [Best-README-Template by othneildrew](https://github.com/othneildrew/Best-README-Template)
-* [PySide6 (Qt for Python)](https://doc.qt.io/qtforpython-6/)
-* [Matplotlib Data Visualization](https://matplotlib.org/)
-* [Seaborn Visualization Library](https://seaborn.pydata.org/)
-* [ReportLab PDF Toolkit](https://www.reportlab.com/)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

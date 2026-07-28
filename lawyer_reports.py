@@ -735,7 +735,7 @@ def _render_appointments(chart_type, appts, _d2, _d3):
         counts[a.get("status", "Unknown")] += 1
     labels = ["Requested", "Approved", "Completed", "Declined", "Cancelled"]
     values = [counts.get(l, 0) for l in labels]
-    colors_l = [AMBER, STEEL, GREEN, RED, TEXT_GRAY]
+    colors_l = [AMBER, GREEN, STEEL, RED, TEXT_GRAY]
 
     fig, ax = _make_figure()
     if chart_type == "Pie":
