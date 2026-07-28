@@ -34,6 +34,7 @@ engaz-handoff.md
 audit_gemini.md
 engaz_implementation_plan.md
 engaz_features_14_22_instructions.md
+engaz_implementation_instructions.md
 # json  files
 skills-lock.json
 # --- Ignore Docker files ---
@@ -44,3 +45,5 @@ docker-compose.yml
 # --- Experimental Folders ---
 some experiments(SEC)/
 Scripts/
+# --- database files ---
+engaz_data.json
