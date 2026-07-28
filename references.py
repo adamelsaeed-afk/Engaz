@@ -73,7 +73,7 @@ class AddBookDialog(QDialog):
         cat_row.itemAt(0).widget().setFixedWidth(80)
         cat_row.itemAt(0).widget().setStyleSheet(f"font-size: 12px; font-weight: bold; color: {TEXT_DARK}; border: none;")
         self._category = ArrowComboBox()
-        self._category.addItems(["Criminal Law", "Civil Law", "Corporate Law", "Family Law", "Constitutional", "Other"])
+        self._category.addItems(["Corporate", "Penal", "Civil", "Labor", "Other"])
         self._category.setStyleSheet(_field_style())
         cat_row.addWidget(self._category, stretch=1)
         layout.addLayout(cat_row)
@@ -458,6 +458,17 @@ class BookDetailView(QDialog):
                                f" border-radius: 4px; padding: 6px 20px; font-size: 13px; font-weight: bold; }}")
         open_btn.clicked.connect(self._open_pdf)
         btn_row.addWidget(open_btn)
+
+        fav_btn = QPushButton("\u2605 Bookmark" if self._book.get("is_favorite") else "\u2606 Bookmark")
+        fav_btn.setCursor(Qt.PointingHandCursor)
+        fav_btn.clicked.connect(self._toggle_favorite)
+        fav_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {AMBER}; border: 1px solid {BORDER};"
+            f" border-radius: 4px; padding: 6px 14px; font-size: 12px; }}"
+            f"QPushButton:hover {{ background: #FFF3E0; }}"
+        )
+        self._fav_btn = fav_btn
+        btn_row.addWidget(fav_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -492,13 +503,22 @@ class BookDetailView(QDialog):
             QMessageBox.warning(self, "File Not Found",
                                 f"The PDF could not be found at:\n{path}")
 
+    def _toggle_favorite(self):
+        self._repo.toggle_law_book_favorite(self._book["book_id"])
+        self._book = self._repo.get_law_book(self._book["book_id"]) or self._book
+        if hasattr(self, "_fav_btn"):
+            self._fav_btn.setText("\u2605 Bookmark" if self._book.get("is_favorite") else "\u2606 Bookmark")
+
 
 class BookListView(QWidget):
     book_selected = Signal(dict)
 
+    CATEGORIES = ["All", "Corporate", "Penal", "Civil", "Labor", "Other"]
+
     def __init__(self, repo, parent=None):
         super().__init__(parent)
         self._repo = repo
+        self._fav_only = False
         self._build()
         self.refresh()
 
@@ -507,11 +527,34 @@ class BookListView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search by title, author, or category...")
         self._search.setStyleSheet(_field_style())
         self._search.textChanged.connect(self._on_search)
-        layout.addWidget(self._search)
+        filter_row.addWidget(self._search, stretch=1)
+
+        self._category_filter = QComboBox()
+        self._category_filter.addItems(self.CATEGORIES)
+        self._category_filter.setStyleSheet(_field_style())
+        self._category_filter.currentTextChanged.connect(self._on_search)
+        filter_row.addWidget(self._category_filter)
+
+        self._fav_btn = QPushButton("\u2606")
+        self._fav_btn.setFixedSize(32, 32)
+        self._fav_btn.setToolTip("Show favorites only")
+        self._fav_btn.setCursor(Qt.PointingHandCursor)
+        self._fav_btn.clicked.connect(self._toggle_fav_filter)
+        self._fav_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {AMBER}; border: 1px solid {BORDER};"
+            f" border-radius: 4px; font-size: 16px; }}"
+            f"QPushButton:hover {{ background: #FFF3E0; }}"
+        )
+        filter_row.addWidget(self._fav_btn)
+
+        layout.addLayout(filter_row)
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
@@ -524,6 +567,17 @@ class BookListView(QWidget):
         self._scroll.setWidget(self._container)
         layout.addWidget(self._scroll, stretch=1)
 
+    def _toggle_fav_filter(self):
+        self._fav_only = not self._fav_only
+        self._fav_btn.setText("\u2605" if self._fav_only else "\u2606")
+        self._fav_btn.setStyleSheet(
+            f"QPushButton {{ background: {'#FFF3E0' if self._fav_only else 'transparent'}; "
+            f"color: {AMBER}; border: 1px solid {BORDER};"
+            f" border-radius: 4px; font-size: 16px; }}"
+            f"QPushButton:hover {{ background: #FFF3E0; }}"
+        )
+        self.refresh()
+
     def _clear(self):
         clear_layout(self._list_layout)
 
@@ -531,12 +585,17 @@ class BookListView(QWidget):
         self._clear()
         self._all_books = self._repo.get_all_law_books()
         query = self._search.text().strip().lower()
+        cat = self._category_filter.currentText()
         books = self._all_books
         if query:
             books = [b for b in books
                      if query in b.get("title", "").lower()
                      or query in b.get("author", "").lower()
                      or query in b.get("category", "").lower()]
+        if cat and cat != "All":
+            books = [b for b in books if b.get("category", "") == cat]
+        if self._fav_only:
+            books = [b for b in books if b.get("is_favorite", False)]
         if not books:
             empty = QLabel("No law books found")
             empty.setAlignment(Qt.AlignCenter)
@@ -563,10 +622,12 @@ class BookListView(QWidget):
         shadow.setOffset(0, 1)
         shadow.setColor(QColor(0, 0, 0, 20))
         card.setGraphicsEffect(shadow)
-        cl = QVBoxLayout(card)
-        cl.setContentsMargins(14, 10, 14, 10)
-        cl.setSpacing(4)
+        outer = QHBoxLayout(card)
+        outer.setContentsMargins(14, 10, 14, 10)
+        outer.setSpacing(8)
 
+        cl = QVBoxLayout()
+        cl.setSpacing(4)
         title_lbl = QLabel(book.get("title", ""))
         title_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {TEXT_DARK}; border: none;")
         cl.addWidget(title_lbl)
@@ -581,9 +642,25 @@ class BookListView(QWidget):
         il = QLabel(" · ".join(info))
         il.setStyleSheet(f"font-size: 11px; color: {TEXT_GRAY}; border: none;")
         cl.addWidget(il)
+        outer.addLayout(cl, stretch=1)
+
+        fav_btn = QPushButton("\u2605" if book.get("is_favorite") else "\u2606")
+        fav_btn.setFixedSize(28, 28)
+        fav_btn.setCursor(Qt.PointingHandCursor)
+        fav_color = AMBER if book.get("is_favorite") else "#D1D5DB"
+        fav_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {fav_color}; border: none; font-size: 18px; }}"
+            f"QPushButton:hover {{ color: {AMBER}; }}"
+        )
+        fav_btn.clicked.connect(lambda chk=False, b=book: self._toggle_fav(b))
+        outer.addWidget(fav_btn)
 
         card.mousePressEvent = lambda e, b=book: self.book_selected.emit(dict(b))
         return card
+
+    def _toggle_fav(self, book):
+        self._repo.toggle_law_book_favorite(book["book_id"])
+        self.refresh()
 
 
 class LawLibraryPage(QWidget):

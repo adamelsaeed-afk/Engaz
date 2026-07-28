@@ -31,8 +31,10 @@ NOTIFICATION_PAGE = {
     "appointment_approved": PAGE_CALENDAR,
     "appointment_declined": PAGE_CALENDAR,
     "appointment_completed": PAGE_CALENDAR,
+    "appointment_cancelled": PAGE_CALENDAR,
     "invoice_created": PAGE_INVOICES,
     "invoice_paid": PAGE_INVOICES,
+    "invoice_overdue": PAGE_INVOICES,
     "message_received": PAGE_MESSAGES,
     "case_created": PAGE_CASES,
     "case_attachment_added": PAGE_CASES,
@@ -43,15 +45,22 @@ def _status_badge(status_text):
     colors = {
         "Open": (STEEL, WHITE),
         "In Progress": (AMBER, WHITE),
+        "On Hold": (TEXT_GRAY, WHITE),
         "Closed": (TEXT_GRAY, WHITE),
+        "Won": (GREEN, WHITE),
+        "Lost": (RED, WHITE),
         "Approved": (GREEN, WHITE),
         "Requested": (AMBER, WHITE),
         "Declined": (RED, WHITE),
         "Completed": (STEEL, WHITE),
         "Cancelled": (TEXT_GRAY, WHITE),
+        "No Show": (RED, WHITE),
         "Pending": (AMBER, WHITE),
         "Paid": (GREEN, WHITE),
         "Overdue": (RED, WHITE),
+        "Draft": (TEXT_GRAY, WHITE),
+        "Sent": (STEEL, WHITE),
+        "Partially Paid": (AMBER, WHITE),
     }
     bg, fg = colors.get(status_text, (TEXT_GRAY, WHITE))
     lbl = QLabel(status_text)
@@ -81,3 +90,13 @@ def clear_layout(layout):
             item.widget().deleteLater()
         elif item.layout():
             clear_layout(item.layout())
+
+
+def _client_display_name(user):
+    if not user:
+        return "\u2014"
+    if user.get("client_type") == "corporate":
+        org = user.get("organization_name", "")
+        if org:
+            return org
+    return f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or "\u2014"

@@ -4,6 +4,9 @@
 import sys
 import json
 import os
+import tempfile
+import hashlib
+import secrets
 import calendar
 from datetime import datetime, timedelta
 
@@ -23,10 +26,24 @@ from engaz_constants import (
     GREEN, AMBER, RED, BORDER,
     PAGE_DASHBOARD, PAGE_CASES, PAGE_CALENDAR, PAGE_INVOICES,
     PAGE_MESSAGES, PAGE_REPORTS, PAGE_LAW_LIBRARY, PAGE_STAKEHOLDER_DASHBOARD,
-    NOTIFICATION_PAGE, _status_badge, clear_layout,
+    NOTIFICATION_PAGE, _status_badge, clear_layout, _client_display_name,
 )
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engaz_data.json")
+
+
+def hash_password(password: str, salt: str = None) -> tuple[str, str]:
+    if not salt:
+        salt = secrets.token_hex(16)
+    hashed = hashlib.pbkdf2_hmac(
+        'sha256', password.encode('utf-8'), salt.encode('utf-8'), 100_000
+    ).hex()
+    return hashed, salt
+
+
+def verify_password(password: str, stored_hash: str, salt: str) -> bool:
+    new_hash, _ = hash_password(password, salt)
+    return secrets.compare_digest(new_hash, stored_hash)
 
 
 def _minutes_since_midnight(time_str):
@@ -129,9 +146,14 @@ class DataRepository:
 
     def _migrate(self):
         changed = False
-        for key in ("case_files", "law_books", "book_comments", "book_chats"):
+        for key in ("case_files", "law_books", "book_comments", "book_chats",
+                     "case_tasks", "case_timelines", "billable_hours"):
             if key not in self._data:
                 self._data[key] = []
+                changed = True
+        for u in self._data.get("users", []):
+            if "client_type" not in u:
+                u["client_type"] = "individual"
                 changed = True
         stakeholder = next(
             (u for u in self._data.get("users", []) if u.get("role") == "stakeholder"),
@@ -143,6 +165,7 @@ class DataRepository:
                 "username": "ahmad.al-rashid",
                 "password": "stakeholder123",
                 "role": "stakeholder",
+                "client_type": "individual",
                 "first_name": "Ahmad",
                 "last_name": "Al-Rashid",
                 "email": "ahmad@engaz.com",
@@ -151,11 +174,11 @@ class DataRepository:
                     "visible_metrics": ["closing_rate", "revenue", "cases_by_status",
                                          "cases_by_department", "top_lawyers_closing",
                                          "top_lawyers_revenue", "workload",
-                                         "appointments", "client_trends"],
+                                         "appointments", "client_trends", "case_win_loss", "overdue_invoices"],
                     "layout_order": ["closing_rate", "revenue", "cases_by_status",
                                      "cases_by_department", "top_lawyers_closing",
                                      "top_lawyers_revenue", "workload",
-                                     "appointments", "client_trends"],
+                                     "appointments", "client_trends", "case_win_loss", "overdue_invoices"],
                 },
             })
             changed = True
@@ -176,6 +199,9 @@ class DataRepository:
             "case_files": "file",
             "law_books": "book",
             "book_chats": "bchat",
+            "case_tasks": "task",
+            "case_timelines": "timeline",
+            "billable_hours": "billable",
         }
         notif_type_map = {
             "appointments": [
@@ -222,8 +248,16 @@ class DataRepository:
 
     def _save(self):
         self._validate_no_duplicate_ids()
-        with open(self._filepath, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=2, ensure_ascii=False)
+        dir_name = os.path.dirname(os.path.abspath(self._filepath))
+        temp_fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix="engaz_tmp_", suffix=".json")
+        try:
+            with open(temp_fd, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=2, ensure_ascii=False)
+            os.replace(temp_path, self._filepath)
+        except Exception as e:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise RuntimeError(f"Atomic file save failed: {e}") from e
 
     def _validate_no_duplicate_ids(self):
         for collection_key, items in self._data.items():
@@ -282,8 +316,17 @@ class DataRepository:
 
     def find_user_by_credentials(self, username, password):
         for u in self._data["users"]:
-            if u["username"] == username and u["password"] == password:
-                return dict(u)
+            if u["username"] == username:
+                if "salt" in u and "password_hash" in u:
+                    if verify_password(password, u["password_hash"], u["salt"]):
+                        return dict(u)
+                elif u.get("password") == password:
+                    ph, salt = hash_password(password)
+                    u["password_hash"] = ph
+                    u["salt"] = salt
+                    u.pop("password", None)
+                    self._save()
+                    return dict(u)
         return None
 
     def get_user(self, user_id):
@@ -329,6 +372,9 @@ class DataRepository:
             "client_id": case_data["client_id"],
             "lawyer_id": case_data["lawyer_id"],
             "status": case_data.get("status", "Open"),
+            "court": case_data.get("court", ""),
+            "opposing_party": case_data.get("opposing_party", ""),
+            "filing_date": case_data.get("filing_date", ""),
             "created_at": datetime.now().isoformat(),
         }
         self._data["cases"].append(entry)
@@ -417,12 +463,21 @@ class DataRepository:
             "date": data["date"],
             "start_time": data["start_time"],
             "duration_minutes": data.get("duration_minutes", 60),
+            "meeting_type": data.get("meeting_type", "consultation"),
+            "is_first_meeting": data.get("is_first_meeting", False),
             "status": data.get("status", "Requested"),
             "notes": data.get("notes", ""),
         }
         self._data["appointments"].append(entry)
         self._save()
         return dict(entry)
+
+    def client_has_prior_appointments(self, client_id, lawyer_id):
+        for a in self._data["appointments"]:
+            if a["client_id"] == client_id and a["lawyer_id"] == lawyer_id:
+                if a["status"] not in ("Declined", "Cancelled", "No Show"):
+                    return True
+        return False
 
     def update_appointment(self, appointment_id, **updates):
         for i, a in enumerate(self._data["appointments"]):
@@ -507,7 +562,8 @@ class DataRepository:
             "client_id": data["client_id"],
             "description": data["description"],
             "amount": data["amount"],
-            "status": data.get("status", "Pending"),
+            "amount_paid": data.get("amount_paid", 0.0),
+            "status": data.get("status", "Draft"),
             "due_date": data["due_date"],
             "created_at": datetime.now().isoformat(),
         }
@@ -620,6 +676,7 @@ class DataRepository:
             "sender_id": data["sender_id"],
             "receiver_id": data["receiver_id"],
             "case_id": data.get("case_id", ""),
+            "case_link_id": data.get("case_link_id", ""),
             "content": data["content"],
             "is_read": False,
             "created_at": datetime.now().isoformat(),
@@ -730,11 +787,21 @@ class DataRepository:
             "category": data.get("category", ""),
             "file_name": data["file_name"],
             "added_by": data["added_by"],
+            "is_favorite": data.get("is_favorite", False),
             "added_at": datetime.now().isoformat(),
         }
         self._data.setdefault("law_books", []).append(entry)
         self._save()
         return dict(entry)
+
+    def toggle_law_book_favorite(self, book_id):
+        for b in self._data.get("law_books", []):
+            if b["book_id"] == book_id:
+                b.setdefault("is_favorite", False)
+                b["is_favorite"] = not b["is_favorite"]
+                self._save()
+                return dict(b)
+        return None
 
     def delete_law_book(self, book_id):
         for coll in ("book_comments", "book_chats"):
@@ -809,6 +876,108 @@ class DataRepository:
                 return True
         return False
 
+    def get_tasks_for_case(self, case_id):
+        return [dict(t) for t in self._data.get("case_tasks", [])
+                if t["case_id"] == case_id]
+
+    def create_task(self, task_data):
+        entry = {
+            "task_id": self._next_id("case_tasks", "task"),
+            "case_id": task_data["case_id"],
+            "assigned_to": task_data.get("assigned_to", ""),
+            "title": task_data["title"],
+            "description": task_data.get("description", ""),
+            "due_date": task_data.get("due_date", ""),
+            "is_completed": task_data.get("is_completed", False),
+            "created_at": datetime.now().isoformat(),
+        }
+        self._data.setdefault("case_tasks", []).append(entry)
+        self._save()
+        return dict(entry)
+
+    def update_task(self, task_id, **updates):
+        for i, t in enumerate(self._data.get("case_tasks", [])):
+            if t["task_id"] == task_id:
+                self._data["case_tasks"][i].update(updates)
+                self._save()
+                return dict(self._data["case_tasks"][i])
+        return None
+
+    def delete_task(self, task_id):
+        for i, t in enumerate(self._data.get("case_tasks", [])):
+            if t["task_id"] == task_id:
+                del self._data["case_tasks"][i]
+                self._save()
+                return True
+        return False
+
+    def get_timelines_for_case(self, case_id):
+        items = [dict(tl) for tl in self._data.get("case_timelines", [])
+                 if tl["case_id"] == case_id]
+        items.sort(key=lambda tl: tl.get("event_date", ""))
+        return items
+
+    def create_timeline(self, timeline_data):
+        entry = {
+            "timeline_id": self._next_id("case_timelines", "timeline"),
+            "case_id": timeline_data["case_id"],
+            "event_type": timeline_data.get("event_type", "Milestone"),
+            "title": timeline_data["title"],
+            "description": timeline_data.get("description", ""),
+            "event_date": timeline_data.get("event_date", ""),
+            "is_completed": timeline_data.get("is_completed", False),
+            "created_at": datetime.now().isoformat(),
+        }
+        self._data.setdefault("case_timelines", []).append(entry)
+        self._save()
+        return dict(entry)
+
+    def update_timeline(self, timeline_id, **updates):
+        for i, tl in enumerate(self._data.get("case_timelines", [])):
+            if tl["timeline_id"] == timeline_id:
+                self._data["case_timelines"][i].update(updates)
+                self._save()
+                return dict(self._data["case_timelines"][i])
+        return None
+
+    def delete_timeline(self, timeline_id):
+        for i, tl in enumerate(self._data.get("case_timelines", [])):
+            if tl["timeline_id"] == timeline_id:
+                del self._data["case_timelines"][i]
+                self._save()
+                return True
+        return False
+
+    def get_billable_hours_for_case(self, case_id):
+        return [dict(bh) for bh in self._data.get("billable_hours", [])
+                if bh["case_id"] == case_id]
+
+    def create_billable_hour(self, data):
+        entry = {
+            "billable_id": self._next_id("billable_hours", "billable"),
+            "case_id": data["case_id"],
+            "lawyer_id": data["lawyer_id"],
+            "date": data.get("date", datetime.now().strftime("%Y-%m-%d")),
+            "hours": data["hours"],
+            "hourly_rate": data["hourly_rate"],
+            "description": data.get("description", ""),
+            "created_at": datetime.now().isoformat(),
+        }
+        self._data.setdefault("billable_hours", []).append(entry)
+        self._save()
+        return dict(entry)
+
+    def delete_billable_hour(self, billable_id):
+        for i, bh in enumerate(self._data.get("billable_hours", [])):
+            if bh["billable_id"] == billable_id:
+                del self._data["billable_hours"][i]
+                self._save()
+                return True
+        return False
+
+    def get_rate_cap(self):
+        return self._data.get("_meta", {}).get("rate_cap", 500.0)
+
 
 # ── Seed Data ─────────────────────────────────────────────────────────────
 
@@ -816,28 +985,37 @@ def _build_seed_data():
     now = datetime.now().isoformat()
     users = [
         {"user_id": "user_1", "username": "sarah.jenkins", "password": "lawyer123", "role": "lawyer",
-         "first_name": "Sarah", "last_name": "Jenkins", "email": "sarah@engaz.com", "phone": "555-0101"},
+         "first_name": "Sarah", "last_name": "Jenkins", "email": "sarah@engaz.com", "phone": "555-0101",
+         "client_type": "individual", "specializations": ["Criminal Defense", "Family Law"]},
         {"user_id": "user_2", "username": "david.miller", "password": "lawyer123", "role": "lawyer",
-         "first_name": "David", "last_name": "Miller", "email": "david@engaz.com", "phone": "555-0102"},
+         "first_name": "David", "last_name": "Miller", "email": "david@engaz.com", "phone": "555-0102",
+         "client_type": "individual", "specializations": ["Civil Litigation", "Estate Planning"]},
         {"user_id": "user_3", "username": "maria.garcia", "password": "lawyer123", "role": "lawyer",
-         "first_name": "Maria", "last_name": "Garcia", "email": "maria@engaz.com", "phone": "555-0103"},
+         "first_name": "Maria", "last_name": "Garcia", "email": "maria@engaz.com", "phone": "555-0103",
+         "client_type": "individual", "specializations": ["Corporate Law", "Tax Law"]},
         {"user_id": "user_4", "username": "john.doe", "password": "client123", "role": "client",
-         "first_name": "John", "last_name": "Doe", "email": "john@email.com", "phone": "555-0201"},
+         "first_name": "John", "last_name": "Doe", "email": "john@email.com", "phone": "555-0201",
+         "client_type": "individual", "organization_name": "", "tax_id": "", "contact_person": ""},
         {"user_id": "user_5", "username": "jane.smith", "password": "client123", "role": "client",
-         "first_name": "Jane", "last_name": "Smith", "email": "jane@email.com", "phone": "555-0202"},
-        {"user_id": "user_6", "username": "mike.johnson", "password": "client123", "role": "client",
-         "first_name": "Mike", "last_name": "Johnson", "email": "mike@email.com", "phone": "555-0203"},
+         "first_name": "Jane", "last_name": "Smith", "email": "jane@email.com", "phone": "555-0202",
+         "client_type": "individual", "organization_name": "", "tax_id": "", "contact_person": ""},
+        {"user_id": "user_6", "username": "techcorp.legal", "password": "client123", "role": "client",
+         "first_name": "Mike", "last_name": "Johnson", "email": "legal@techcorp.com", "phone": "555-0203",
+         "client_type": "corporate", "organization_name": "TechCorp Ltd.",
+         "tax_id": "TAX-2024-001", "contact_person": "Mike Johnson"},
         {"user_id": "user_7", "username": "lisa.wong", "password": "client123", "role": "client",
-         "first_name": "Lisa", "last_name": "Wong", "email": "lisa@email.com", "phone": "555-0204"},
+         "first_name": "Lisa", "last_name": "Wong", "email": "lisa@email.com", "phone": "555-0204",
+         "client_type": "individual", "organization_name": "", "tax_id": "", "contact_person": ""},
         {"user_id": "user_8", "username": "ahmad.al-rashid", "password": "stakeholder123", "role": "stakeholder",
          "first_name": "Ahmad", "last_name": "Al-Rashid", "email": "ahmad@engaz.com", "phone": "0501234567",
+         "client_type": "individual",
          "dashboard_preferences": {
              "visible_metrics": ["closing_rate", "revenue", "cases_by_status", "cases_by_department",
                                   "top_lawyers_closing", "top_lawyers_revenue", "workload",
-                                  "appointments", "client_trends"],
+                                  "appointments", "client_trends", "case_win_loss", "overdue_invoices"],
              "layout_order": ["closing_rate", "revenue", "cases_by_status", "cases_by_department",
                               "top_lawyers_closing", "top_lawyers_revenue", "workload",
-                              "appointments", "client_trends"],
+                              "appointments", "client_trends", "case_win_loss", "overdue_invoices"],
          }},
     ]
     cases = [
@@ -880,19 +1058,20 @@ def _build_seed_data():
     invoices = [
         {"invoice_id": "inv_1", "invoice_number": "INV-001", "case_id": "case_1", "lawyer_id": "user_1",
          "client_id": "user_4", "description": "Retainer for criminal defense", "amount": 2500.00,
-         "status": "Pending", "due_date": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
+         "amount_paid": 0.0, "status": "Sent", "due_date": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
          "created_at": now},
         {"invoice_id": "inv_2", "invoice_number": "INV-002", "case_id": "case_2", "lawyer_id": "user_2",
          "client_id": "user_5", "description": "Estate planning consultation", "amount": 1500.00,
-         "status": "Paid", "due_date": (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d"),
+         "amount_paid": 1500.0, "status": "Paid", "due_date": (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d"),
          "created_at": now},
         {"invoice_id": "inv_3", "invoice_number": "INV-003", "case_id": "case_3", "lawyer_id": "user_3",
          "client_id": "user_6", "description": "Corporate filing fees", "amount": 3200.00,
-         "status": "Overdue", "due_date": (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d"),
+         "amount_paid": 1000.0, "status": "Partially Paid",
+         "due_date": (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d"),
          "created_at": now},
         {"invoice_id": "inv_4", "invoice_number": "INV-004", "case_id": "case_4", "lawyer_id": "user_1",
          "client_id": "user_7", "description": "Custody case retainer", "amount": 1800.00,
-         "status": "Pending", "due_date": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"),
+         "amount_paid": 0.0, "status": "Draft", "due_date": (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"),
          "created_at": now},
     ]
     notifications = [
@@ -915,11 +1094,14 @@ def _build_seed_data():
          "message": "Jane Smith paid invoice INV-002.", "notification_type": "invoice_paid",
          "reference_id": "inv_2", "is_read": True, "created_at": now},
     ]
-    meta = {"next_case_number": 7, "next_invoice_number": 5}
+    meta = {"next_case_number": 7, "next_invoice_number": 5, "rate_cap": 500.0}
     return {
         "_meta": meta, "users": users, "cases": cases, "appointments": appointments,
         "invoices": invoices, "messages": [], "notifications": notifications,
         "case_files": [],
+        "case_tasks": [],
+        "case_timelines": [],
+        "billable_hours": [],
         "law_books": [],
         "book_comments": [],
         "book_chats": [],
@@ -1671,8 +1853,8 @@ class CaseForm(QDialog):
         self._is_edit = case is not None
         self._case_deleted = False
         self.setWindowTitle("Edit Case" if self._is_edit else "New Case")
-        self.resize(520, 460)
-        self.setMinimumSize(440, 380)
+        self.resize(540, 560)
+        self.setMinimumSize(460, 480)
         self._build()
         if self._is_edit:
             self._fill_form()
@@ -1723,7 +1905,7 @@ class CaseForm(QDialog):
         self._client_input = ArrowComboBox()
         for client in self._repo.get_all_clients():
             self._client_input.addItem(
-                f"{client['first_name']} {client['last_name']}", client["user_id"]
+                _client_display_name(client), client["user_id"]
             )
         self._client_input.setStyleSheet(self._field_style())
         self._client_input.setEditable(False)
@@ -1738,7 +1920,7 @@ class CaseForm(QDialog):
         label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         grid.addWidget(label, r, 0)
         self._status_input = ArrowComboBox()
-        self._status_input.addItems(["Open", "In Progress", "Closed"])
+        self._status_input.addItems(["Open", "In Progress", "On Hold", "Closed", "Won", "Lost"])
         self._status_input.setStyleSheet(self._field_style())
         self._status_input.setEditable(False)
         self._status_input.setView(QListView())
@@ -1753,6 +1935,31 @@ class CaseForm(QDialog):
         self._case_date_input.setDate(QDate.currentDate())
         self._case_date_input.setStyleSheet(self._field_style())
         grid.addWidget(self._case_date_input, r, 1)
+        r += 1
+
+        grid.addWidget(self._required_label("Court"), r, 0)
+        self._court_input = QLineEdit()
+        self._court_input.setStyleSheet(self._field_style())
+        grid.addWidget(self._court_input, r, 1)
+        self._court_error = _ErrorLabel()
+        grid.addWidget(self._court_error, r, 2)
+        r += 1
+
+        grid.addWidget(self._required_label("Opposing Party"), r, 0)
+        self._opposing_party_input = QLineEdit()
+        self._opposing_party_input.setStyleSheet(self._field_style())
+        grid.addWidget(self._opposing_party_input, r, 1)
+        self._opposing_party_error = _ErrorLabel()
+        grid.addWidget(self._opposing_party_error, r, 2)
+        r += 1
+
+        label = self._label("Filing Date")
+        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        grid.addWidget(label, r, 0)
+        self._filing_date_input = LeftAlignedDateEdit()
+        self._filing_date_input.setDate(QDate.currentDate())
+        self._filing_date_input.setStyleSheet(self._field_style())
+        grid.addWidget(self._filing_date_input, r, 1)
         r += 1
 
         layout.addLayout(grid)
@@ -1869,16 +2076,30 @@ class CaseForm(QDialog):
             dt = QDate.fromString(self._case["case_date"], "yyyy-MM-dd")
             if dt.isValid():
                 self._case_date_input.setDate(dt)
+        self._court_input.setText(self._case.get("court", ""))
+        self._opposing_party_input.setText(self._case.get("opposing_party", ""))
+        if self._case.get("filing_date"):
+            dt = QDate.fromString(self._case["filing_date"], "yyyy-MM-dd")
+            if dt.isValid():
+                self._filing_date_input.setDate(dt)
 
     def _try_save(self):
         self._title_error.clear_message()
         self._client_error.clear_message()
+        self._court_error.clear_message()
+        self._opposing_party_error.clear_message()
         valid = True
         if not self._title_input.text().strip():
             self._title_error.show_message("Title is required")
             valid = False
         if self._client_input.currentIndex() < 0:
             self._client_error.show_message("Please select a client")
+            valid = False
+        if not self._court_input.text().strip():
+            self._court_error.show_message("Court is required")
+            valid = False
+        if not self._opposing_party_input.text().strip():
+            self._opposing_party_error.show_message("Opposing party is required")
             valid = False
         if valid:
             if self._status_input.currentText() == "Closed":
@@ -1917,6 +2138,9 @@ class CaseForm(QDialog):
             "case_date": self._case_date_input.date().toString("yyyy-MM-dd"),
             "client_id": self._client_input.currentData(),
             "status": self._status_input.currentText(),
+            "court": self._court_input.text().strip(),
+            "opposing_party": self._opposing_party_input.text().strip(),
+            "filing_date": self._filing_date_input.date().toString("yyyy-MM-dd"),
         }
 
 
@@ -1958,7 +2182,7 @@ class Casepagemain(QWidget):
         bar.addWidget(self._search)
 
         self._status_filter = ArrowComboBox()
-        self._status_filter.addItems(["All Status", "Open", "In Progress", "Closed"])
+        self._status_filter.addItems(["All Status", "Open", "In Progress", "On Hold", "Closed", "Won", "Lost"])
         self._status_filter.setEditable(False)
         self._status_filter.setView(QListView())
         self._status_filter.setInsertPolicy(QComboBox.NoInsert)
@@ -2078,7 +2302,10 @@ class Casepagemain(QWidget):
             self._table.setCellWidget(row, 3, _status_badge(case["status"]))
             person_id = case["client_id"] if self._is_lawyer else case["lawyer_id"]
             person = self._repo.get_user(person_id)
-            person_name = f"{person['first_name']} {person['last_name']}" if person else "—"
+            if person:
+                person_name = _client_display_name(person) if self._is_lawyer else f"{person['first_name']} {person['last_name']}"
+            else:
+                person_name = "\u2014"
             self._table.setItem(row, 4, QTableWidgetItem(person_name))
             self._table.setItem(row, 5, QTableWidgetItem(case["created_at"][:10]))
         self._update_empty_state()
@@ -2137,7 +2364,7 @@ class Casepagemain(QWidget):
         data["lawyer_id"] = self._user["user_id"]
         new_case = self._repo.create_case(data)
         client = self._repo.get_user(data["client_id"])
-        client_name = f"{client['first_name']} {client['last_name']}" if client else "a client"
+        client_name = _client_display_name(client) if client else "a client"
         self._repo.create_notification({
             "user_id": data["client_id"],
             "title": "New Case Created",
@@ -2157,6 +2384,11 @@ class Casepagemain(QWidget):
         data = dialog.case_data()
         self._repo.update_case(case["case_id"], **data)
         self._load_table()
+
+    def navigate_to_case(self, case_id):
+        case = self._repo.get_case(case_id)
+        if case:
+            self._open_case_detail(case)
 
     def _show_detail_dialog(self, case):
         client = self._repo.get_user(case["client_id"])
@@ -2361,6 +2593,8 @@ class MonthCalendar(QFrame):
 
 
 class AppointmentDialog(QDialog):
+    MEETING_TYPES = ["consultation", "hearing", "deposition", "follow_up"]
+
     def __init__(self, repo, user, date_str, parent=None):
         super().__init__(parent)
         self._repo = repo
@@ -2368,7 +2602,7 @@ class AppointmentDialog(QDialog):
         self._date_str = date_str
         self._is_lawyer = user["role"] == "lawyer"
         self.setWindowTitle("New Appointment")
-        self.resize(480, 440)
+        self.resize(480, 520)
         self._build()
 
     def _build(self):
@@ -2395,6 +2629,7 @@ class AppointmentDialog(QDialog):
             for law in self._repo.get_all_lawyers():
                 self._lawyer.addItem(f"{law['first_name']} {law['last_name']}", law["user_id"])
             self._lawyer.setStyleSheet(self._fs())
+            self._lawyer.currentIndexChanged.connect(self._on_lawyer_changed)
             grid.addWidget(self._lawyer, r, 1)
             r += 1
 
@@ -2406,6 +2641,16 @@ class AppointmentDialog(QDialog):
             self._case.addItem(f"{c['case_number']} – {c['title']}", c["case_id"])
         self._case.setStyleSheet(self._fs())
         grid.addWidget(self._case, r, 1)
+        r += 1
+
+        grid.addWidget(self._lbl("Meeting Type:"), r, 0)
+        self._meeting_type = ArrowComboBox()
+        self._meeting_type.addItems(self.MEETING_TYPES)
+        self._meeting_type.setStyleSheet(self._fs())
+        self._meeting_type.setEditable(False)
+        self._meeting_type.setView(QListView())
+        self._meeting_type.setInsertPolicy(QComboBox.NoInsert)
+        grid.addWidget(self._meeting_type, r, 1)
         r += 1
 
         grid.addWidget(self._lbl("Date:"), r, 0)
@@ -2460,6 +2705,16 @@ class AppointmentDialog(QDialog):
         btns.addWidget(save)
         layout.addLayout(btns)
 
+    def _on_lawyer_changed(self):
+        if self._is_lawyer or not hasattr(self, "_lawyer"):
+            return
+        lawyer_id = self._lawyer.currentData()
+        if not lawyer_id:
+            return
+        is_first = not self._repo.client_has_prior_appointments(self._user["user_id"], lawyer_id)
+        if is_first:
+            self._duration.setCurrentIndex(0)
+
     def _lbl(self, text):
         lbl = QLabel(text)
         lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;")
@@ -2492,12 +2747,17 @@ class AppointmentDialog(QDialog):
         self.accept()
 
     def appointment_data(self):
+        lawyer_id = self._user["user_id"] if self._is_lawyer else self._lawyer.currentData()
+        client_id = self._user["user_id"] if not self._is_lawyer else ""
+        is_first = not self._repo.client_has_prior_appointments(client_id, lawyer_id) if not self._is_lawyer else False
         return {
             "title": self._title.text().strip(),
-            "lawyer_id": self._user["user_id"] if self._is_lawyer else self._lawyer.currentData(),
+            "lawyer_id": lawyer_id,
             "date": self._date_str,
             "start_time": self._time.currentText(),
             "duration_minutes": self._duration.currentData() or 60,
+            "meeting_type": self._meeting_type.currentText(),
+            "is_first_meeting": is_first,
             "notes": self._notes.toPlainText().strip(),
             "case_id": self._case.currentData() or "",
         }
@@ -2648,19 +2908,47 @@ class CalendarPage(QWidget):
         hl = QHBoxLayout(frame)
         hl.setContentsMargins(12, 8, 12, 8)
 
-        # info layout (title, detail, notes)
+        other_id = appt["client_id"] if self._is_lawyer else appt["lawyer_id"]
+        other_person = self._repo.get_user(other_id)
+
         info = QVBoxLayout()
         tl = QLabel(appt["title"])
         tl.setStyleSheet(f"font-weight: bold; color: {TEXT_DARK}; font-size: 13px; border: none;")
         info.addWidget(tl)
-        detail = QLabel(f"{appt['start_time']}  ·  {appt['duration_minutes']} min")
+
+        mt = appt.get("meeting_type", "consultation")
+        detail_parts = [f"{appt['start_time']}  ·  {appt['duration_minutes']} min  ·  {mt.replace('_', ' ').title()}"]
+        detail = QLabel("".join(detail_parts))
         detail.setStyleSheet(f"color: {TEXT_GRAY}; font-size: 12px; border: none;")
         info.addWidget(detail)
+
+        if other_person:
+            other_lines = []
+            if self._is_lawyer:
+                other_lines.append(f"Client: {_client_display_name(other_person)}")
+                ct = other_person.get("client_type", "individual")
+                other_lines.append(f"Type: {ct.capitalize()}")
+                if other_person.get("organization_name"):
+                    other_lines.append(f"Org: {other_person['organization_name']}")
+            else:
+                other_lines.append(f"Lawyer: {other_person['first_name']} {other_person['last_name']}")
+                specs = other_person.get("specializations", [])
+                if specs:
+                    other_lines.append(f"Specializations: {', '.join(specs)}")
+            other_lines.append(f"Email: {other_person.get('email', '')}")
+            other_lines.append(f"Phone: {other_person.get('phone', '')}")
+
+            for ol in other_lines:
+                olb = QLabel(ol)
+                olb.setStyleSheet(f"color: {TEXT_GRAY}; font-size: 11px; border: none;")
+                info.addWidget(olb)
+
         if appt.get("notes"):
             n = QLabel(appt["notes"])
             n.setStyleSheet(f"color: {TEXT_GRAY}; font-size: 11px; font-style: italic; border: none;")
             n.setWordWrap(True)
             info.addWidget(n)
+
         hl.addLayout(info)
         hl.addStretch()
 
@@ -2760,6 +3048,12 @@ class CalendarPage(QWidget):
             complete_btn.clicked.connect(lambda chk, a=appt, ac=actions: self._complete(a, ac))
             actions_layout.addWidget(complete_btn)
 
+            noshow_btn = QPushButton("No Show")
+            noshow_btn.setFixedHeight(28)
+            noshow_btn.setStyleSheet(btn_no_border % (AMBER, AMBER, WHITE))
+            noshow_btn.clicked.connect(lambda chk, a=appt, ac=actions: self._no_show(a, ac))
+            actions_layout.addWidget(noshow_btn)
+
         if not self._is_lawyer and appt["status"] == "Requested":
             cancel_btn = QPushButton("Cancel")
             cancel_btn.setFixedHeight(28)
@@ -2823,6 +3117,7 @@ class CalendarPage(QWidget):
         "Declined":  ("Appointment Declined", "declined", RED),
         "Completed": ("Appointment Completed", "completed", STEEL),
         "Cancelled": ("Appointment Cancelled", "cancelled", TEXT_GRAY),
+        "No Show":   ("Appointment No Show", "marked as no-show", AMBER),
     }
 
     def _update_appointment_status(self, appt, new_status, actions=None):
@@ -2842,6 +3137,7 @@ class CalendarPage(QWidget):
                 "Declined": (RED, WHITE),
                 "Completed": (STEEL, WHITE),
                 "Cancelled": (TEXT_GRAY, WHITE),
+                "No Show": (AMBER, WHITE),
             }
             bg, fg = colors.get(new_status, (TEXT_GRAY, WHITE))
             badge.setText(new_status)
@@ -2896,6 +3192,16 @@ class CalendarPage(QWidget):
             return
         self._update_appointment_status(appt, "Cancelled", actions)
 
+    def _no_show(self, appt, actions=None):
+        answer = QMessageBox.question(
+            self, "Confirm No Show",
+            "Mark this appointment as a no-show?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self._update_appointment_status(appt, "No Show", actions)
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Invoicing & Payment
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2906,7 +3212,7 @@ class InvoiceFormDialog(QDialog):
         self._repo = repo
         self._user = user
         self.setWindowTitle("New Invoice")
-        self.resize(460, 360)
+        self.resize(500, 500)
         self._build()
 
     def _build(self):
@@ -2925,9 +3231,10 @@ class InvoiceFormDialog(QDialog):
         self._case = ArrowComboBox()
         for c in self._repo.get_cases_for_lawyer(self._user["user_id"]):
             client = self._repo.get_user(c["client_id"])
-            cn = f"{client['first_name']} {client['last_name']}" if client else "—"
+            cn = _client_display_name(client)
             self._case.addItem(f"{c['case_number']} – {c['title']} ({cn})", c["case_id"])
         self._case.setStyleSheet(self._fs())
+        self._case.currentIndexChanged.connect(self._on_case_changed)
         grid.addWidget(self._case, r, 1)
         r += 1
 
@@ -2937,10 +3244,32 @@ class InvoiceFormDialog(QDialog):
         grid.addWidget(self._desc, r, 1)
         r += 1
 
+        grid.addWidget(self._lbl("Billable Hours:"), r, 0)
+        self._hours_summary = QLabel("No billable hours logged for this case.")
+        self._hours_summary.setStyleSheet(
+            f"font-size: 12px; color: {TEXT_GRAY}; border: 1px solid {BORDER};"
+            f" border-radius: 4px; padding: 6px 8px; background: {CARD_BG};"
+        )
+        self._hours_summary.setWordWrap(True)
+        grid.addWidget(self._hours_summary, r, 1)
+        r += 1
+
         grid.addWidget(self._lbl("* Amount ($):"), r, 0)
         self._amount = QLineEdit()
         self._amount.setStyleSheet(self._fs())
         grid.addWidget(self._amount, r, 1)
+        self._recalc_hours_btn = QPushButton("Calc")
+        self._recalc_hours_btn.setFixedWidth(50)
+        self._recalc_hours_btn.setStyleSheet(
+            f"QPushButton {{ background: {STEEL}; color: {WHITE}; border: none; border-radius: 4px;"
+            f" padding: 4px 8px; font-size: 11px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {NAVY}; }}"
+        )
+        self._recalc_hours_btn.clicked.connect(self._recalc_from_hours)
+        recalc_row = QHBoxLayout()
+        recalc_row.addWidget(self._amount, stretch=1)
+        recalc_row.addWidget(self._recalc_hours_btn)
+        grid.addLayout(recalc_row, r, 2)
         r += 1
 
         grid.addWidget(self._lbl("* Due Date:"), r, 0)
@@ -2950,7 +3279,19 @@ class InvoiceFormDialog(QDialog):
         grid.addWidget(self._due, r, 1)
         r += 1
 
+        grid.addWidget(self._lbl("Status:"), r, 0)
+        self._status = ArrowComboBox()
+        self._status.addItems(["Draft", "Sent"])
+        self._status.setStyleSheet(self._fs())
+        self._status.setEditable(False)
+        self._status.setView(QListView())
+        self._status.setInsertPolicy(QComboBox.NoInsert)
+        grid.addWidget(self._status, r, 1)
+        r += 1
+
         layout.addLayout(grid)
+        self._rate_cap_warn = _ErrorLabel()
+        layout.addWidget(self._rate_cap_warn)
         self._error = _ErrorLabel()
         layout.addWidget(self._error)
         layout.addStretch()
@@ -2971,6 +3312,34 @@ class InvoiceFormDialog(QDialog):
         btns.addWidget(save)
         layout.addLayout(btns)
 
+    def _on_case_changed(self):
+        self._update_hours_summary()
+
+    def _update_hours_summary(self):
+        case_id = self._case.currentData()
+        if not case_id:
+            self._hours_summary.setText("No case selected.")
+            return
+        hours_entries = self._repo.get_billable_hours_for_case(case_id)
+        if not hours_entries:
+            self._hours_summary.setText("No billable hours logged for this case.")
+            return
+        total = sum(h["hours"] * h["hourly_rate"] for h in hours_entries)
+        lines = [f"{h['date']}: {h['description']} — {h['hours']}h × ${h['hourly_rate']:.2f} = ${h['hours'] * h['hourly_rate']:.2f}"
+                 for h in hours_entries]
+        lines.append(f"Total from billable hours: ${total:,.2f}")
+        self._hours_summary.setText("\n".join(lines))
+
+    def _recalc_from_hours(self):
+        case_id = self._case.currentData()
+        if not case_id:
+            return
+        hours_entries = self._repo.get_billable_hours_for_case(case_id)
+        if not hours_entries:
+            return
+        total = sum(h["hours"] * h["hourly_rate"] for h in hours_entries)
+        self._amount.setText(f"{total:.2f}")
+
     def _lbl(self, text):
         lbl = QLabel(text)
         lbl.setStyleSheet(f"font-size: 13px; font-weight: 500; color: {TEXT_DARK}; border: none;")
@@ -2981,6 +3350,7 @@ class InvoiceFormDialog(QDialog):
 
     def _try_save(self):
         self._error.clear_message()
+        self._rate_cap_warn.clear_message()
         if self._case.currentData() is None:
             self._error.show_message("Please select a case"); return
         if not self._desc.text().strip():
@@ -2993,6 +3363,15 @@ class InvoiceFormDialog(QDialog):
             self._error.show_message("Please enter a valid amount"); return
         if not self._due.date().isValid():
             self._error.show_message("Please select a due date"); return
+        rate_cap = self._repo.get_rate_cap()
+        case_id = self._case.currentData()
+        hours_entries = self._repo.get_billable_hours_for_case(case_id)
+        for h in hours_entries:
+            if h["hourly_rate"] > rate_cap:
+                self._rate_cap_warn.show_message(
+                    f"Warning: Rate cap is ${rate_cap:.2f}/hr. "
+                    f"Entry '{h['description']}' has rate ${h['hourly_rate']:.2f}/hr."
+                )
         self.accept()
 
     def invoice_data(self):
@@ -3004,6 +3383,7 @@ class InvoiceFormDialog(QDialog):
             "description": self._desc.text().strip(),
             "amount": float(self._amount.text().strip()),
             "due_date": self._due.date().toString("yyyy-MM-dd"),
+            "status": self._status.currentText(),
         }
 
 
@@ -3069,6 +3449,13 @@ class PaymentDialog(QDialog):
         self._total_label = QLabel()
         self._total_label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {NAVY}; border: none;")
         layout.addWidget(self._total_label)
+
+        pay_row = QHBoxLayout()
+        pay_row.addWidget(QLabel("Amount to Pay ($):"))
+        self._pay_amount = QLineEdit()
+        self._pay_amount.setStyleSheet(f"padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px; font-size: 13px;")
+        pay_row.addWidget(self._pay_amount)
+        layout.addLayout(pay_row)
         return page
 
     def _page_card(self):
@@ -3192,26 +3579,42 @@ class PaymentDialog(QDialog):
         if not invoices:
             self._check_layout.insertWidget(0, QLabel("No unpaid invoices."))
             self._total_label.setText("Total: $0.00")
+            self._pay_amount.setText("")
             return
         for inv in invoices:
-            cb = QCheckBox(f"{inv['invoice_number']} — {inv['description']} (${inv['amount']:,.2f})")
+            remaining = inv["amount"] - inv.get("amount_paid", 0.0)
+            label = f"{inv['invoice_number']} — {inv['description']} (${inv['amount']:,.2f}, Remaining: ${remaining:,.2f})"
+            cb = QCheckBox(label)
             cb.setStyleSheet(f"font-size: 12px; color: {TEXT_DARK}; border: 1px solid {BORDER}; border-radius: 4px; padding: 6px;")
             cb.toggled.connect(self._update_total)
             self._check_layout.insertWidget(self._check_layout.count() - 1, cb)
-            self._checks.append((cb, inv))
+            self._checks.append((cb, inv, remaining))
         self._check_layout.addStretch()
+        total_remaining = sum(rem for cb, inv, rem in self._checks)
+        self._pay_amount.setText(f"{total_remaining:.2f}" if total_remaining > 0 else "")
         self._update_total()
 
     def _update_total(self):
-        total = sum(inv["amount"] for cb, inv in self._checks if cb.isChecked())
-        self._total_label.setText(f"Total: ${total:,.2f}")
+        total = sum(rem for cb, inv, rem in self._checks if cb.isChecked())
+        self._total_label.setText(f"Total remaining: ${total:,.2f}")
 
     def _go_next(self):
         idx = self._stack.currentIndex()
         if idx == 0:
-            self._selected_ids = [inv["invoice_id"] for cb, inv in self._checks if cb.isChecked()]
+            self._selected_ids = [inv["invoice_id"] for cb, inv, rem in self._checks if cb.isChecked()]
             if not self._selected_ids:
                 self._error.show_message("Please select at least one invoice")
+                return
+            try:
+                self._pay_total = float(self._pay_amount.text().strip())
+                if self._pay_total <= 0:
+                    raise ValueError
+            except ValueError:
+                self._error.show_message("Please enter a valid payment amount")
+                return
+            selected_remaining = sum(rem for cb, inv, rem in self._checks if cb.isChecked())
+            if self._pay_total > selected_remaining:
+                self._error.show_message("Payment cannot exceed remaining balance")
                 return
             self._error.clear_message()
             self._stack.setCurrentIndex(1)
@@ -3248,16 +3651,21 @@ class PaymentDialog(QDialog):
     def selected_ids(self):
         return list(self._selected_ids)
 
+    def payment_amount(self):
+        return getattr(self, "_pay_total", 0.0)
+
     def _build_summary(self):
         total = 0
         lines = []
+        lines.append(f"Payment Amount: ${self._pay_total:,.2f}")
+        lines.append("")
         for inv_id in self._selected_ids:
             inv = self._repo.get_invoice(inv_id)
             if inv:
                 lines.append(f"{inv['invoice_number']}: {inv['description']} — ${inv['amount']:,.2f}")
                 total += inv["amount"]
         lines.append("")
-        lines.append(f"Total to charge: ${total:,.2f}")
+        lines.append(f"Total Invoice Value: ${total:,.2f}")
         self._summary_label.setText("<br>".join(lines))
 
     def _go_back(self):
@@ -3272,6 +3680,56 @@ class PaymentDialog(QDialog):
         elif idx == 3:
             self._stack.setCurrentIndex(2)
             self._next_btn.setText("Next →")
+
+
+def export_invoice_pdf(invoice, client, lawyer, case, output_path):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors as rl_colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    doc = SimpleDocTemplate(output_path, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    elements = []
+
+    elements.append(Paragraph("<b>ENGAZ LEGAL PRACTICE</b>", styles["Title"]))
+    elements.append(Paragraph(f"Invoice #: {invoice['invoice_number']}", styles["Heading2"]))
+    elements.append(Spacer(1, 12))
+
+    meta_data = [
+        ["Client:", f"{client.get('first_name', '')} {client.get('last_name', '')}",
+         "Date:", invoice["created_at"][:10]],
+        ["Lawyer:", f"{lawyer.get('first_name', '')} {lawyer.get('last_name', '')}",
+         "Due Date:", invoice["due_date"]],
+        ["Case:", f"{case.get('case_number', 'N/A')} - {case.get('title', 'N/A')}",
+         "Status:", invoice["status"]],
+    ]
+    meta_table = Table(meta_data, colWidths=[100, 200, 80, 140])
+    meta_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TEXTCOLOR', (0, 0), (0, -1), rl_colors.HexColor('#1B3A5C')),
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+    ]))
+    elements.append(meta_table)
+    elements.append(Spacer(1, 16))
+
+    items_data = [
+        ["Description", "Amount"],
+        [invoice["description"], f"${invoice['amount']:,.2f}"],
+        ["Amount Paid:", f"${invoice.get('amount_paid', 0.0):,.2f}"],
+        ["Balance Due:", f"${(invoice['amount'] - invoice.get('amount_paid', 0.0)):,.2f}"],
+    ]
+    table = Table(items_data, colWidths=[380, 140])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#1B3A5C')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), rl_colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#E5E7EB')),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+    ]))
+    elements.append(table)
+    doc.build(elements)
 
 
 class InvoicesPage(QWidget):
@@ -3300,6 +3758,12 @@ class InvoicesPage(QWidget):
                                   f"QPushButton:hover {{ background: {STEEL}; }}")
             new_btn.clicked.connect(self._open_create)
             header.addWidget(new_btn)
+        export_btn = QPushButton("Export All PDF")
+        export_btn.setStyleSheet(f"QPushButton {{ background: {STEEL}; color: {WHITE}; border: none;"
+                                 f" border-radius: 4px; padding: 8px 18px; font-size: 13px; font-weight: bold; }}"
+                                 f"QPushButton:hover {{ background: {NAVY}; }}")
+        export_btn.clicked.connect(self._export_all_pdf)
+        header.addWidget(export_btn)
         layout.addLayout(header)
         layout.addSpacing(12)
 
@@ -3348,7 +3812,10 @@ class InvoicesPage(QWidget):
             self._table.setItem(row, 2, QTableWidgetItem(case["case_number"] if case else "—"))
             pid = inv["client_id"] if self._is_lawyer else inv["lawyer_id"]
             person = self._repo.get_user(pid)
-            pn = f"{person['first_name']} {person['last_name']}" if person else "—"
+            if person:
+                pn = _client_display_name(person) if self._is_lawyer else f"{person['first_name']} {person['last_name']}"
+            else:
+                pn = "\u2014"
             self._table.setItem(row, 3, QTableWidgetItem(pn))
             self._table.setItem(row, 4, QTableWidgetItem(f"${inv['amount']:,.2f}"))
             self._table.setCellWidget(row, 5, _status_badge(inv["status"]))
@@ -3362,7 +3829,7 @@ class InvoicesPage(QWidget):
         data["lawyer_id"] = self._user["user_id"]
         inv = self._repo.create_invoice(data)
         client = self._repo.get_user(data["client_id"])
-        cn = f"{client['first_name']} {client['last_name']}" if client else "a client"
+        cn = _client_display_name(client) if client else "a client"
         self._repo.create_notification({
             "user_id": data["client_id"],
             "title": "Invoice Created",
@@ -3376,20 +3843,105 @@ class InvoicesPage(QWidget):
     def _open_payment(self):
         dlg = PaymentDialog(self._repo, self._user["user_id"], parent=self)
         if dlg.exec() == QDialog.Accepted:
-            for inv_id in dlg.selected_ids():
-                self._repo.update_invoice(inv_id, status="Paid")
+            pay_amount = dlg.payment_amount()
+            selected = dlg.selected_ids()
+            if not selected:
+                self._load_table()
+                return
+            pay_per_inv = pay_amount / len(selected)
+            for inv_id in selected:
                 inv = self._repo.get_invoice(inv_id)
-                if inv:
-                    self._repo.create_notification({
-                        "user_id": inv["lawyer_id"],
-                        "title": "Invoice Paid",
-                        "message": f"Invoice {inv['invoice_number']} for ${inv['amount']:,.2f} has been paid.",
-                        "notification_type": "invoice_paid",
-                        "reference_id": inv_id,
-                    })
+                if not inv:
+                    continue
+                new_paid = inv.get("amount_paid", 0.0) + pay_per_inv
+                if new_paid >= inv["amount"]:
+                    self._repo.update_invoice(inv_id, amount_paid=inv["amount"], status="Paid")
+                else:
+                    self._repo.update_invoice(inv_id, amount_paid=new_paid, status="Partially Paid")
+                self._repo.create_notification({
+                    "user_id": inv["lawyer_id"],
+                    "title": "Invoice Payment Received",
+                    "message": f"Payment of ${pay_per_inv:,.2f} received for invoice {inv['invoice_number']}.",
+                    "notification_type": "invoice_paid",
+                    "reference_id": inv_id,
+                })
             QMessageBox.information(self, "Payment Successful",
                                     "Your payment has been processed successfully.")
         self._load_table()
+
+    def _export_all_pdf(self):
+        from PySide6.QtWidgets import QFileDialog as QFD
+        invoices = (self._repo.get_invoices_for_lawyer(self._user["user_id"])
+                    if self._is_lawyer
+                    else self._repo.get_invoices_for_client(self._user["user_id"]))
+        if not invoices:
+            QMessageBox.information(self, "No Invoices", "No invoices to export.")
+            return
+        base_name = f"engaz_invoices_{QDate.currentDate().toString('yyyy-MM-dd')}"
+        path, _ = QFD.getSaveFileName(self, "Export All Invoices PDF", base_name, "PDF Files (*.pdf)")
+        if not path:
+            return
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib import colors as rl_colors
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.styles import getSampleStyleSheet
+
+            doc = SimpleDocTemplate(path, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
+            styles = getSampleStyleSheet()
+            elements = []
+
+            elements.append(Paragraph("<b>ENGAZ LEGAL PRACTICE</b>", styles["Title"]))
+            elements.append(Paragraph("All Invoices Report", styles["Heading2"]))
+            elements.append(Paragraph(f"Generated: {QDate.currentDate().toString('yyyy-MM-dd')}", styles["Normal"]))
+            elements.append(Spacer(1, 16))
+
+            table_data = [["Invoice #", "Description", "Case", "Amount", "Paid", "Balance", "Status", "Due"]]
+            for inv in invoices:
+                case = self._repo.get_case(inv.get("case_id", ""))
+                table_data.append([
+                    inv["invoice_number"],
+                    inv["description"][:30],
+                    case["case_number"] if case else "—",
+                    f"${inv['amount']:,.2f}",
+                    f"${inv.get('amount_paid', 0.0):,.2f}",
+                    f"${(inv['amount'] - inv.get('amount_paid', 0.0)):,.2f}",
+                    inv["status"],
+                    inv.get("due_date", ""),
+                ])
+
+            table = Table(table_data, repeatRows=1)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor('#1B3A5C')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), rl_colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.HexColor('#E5E7EB')),
+                ('ALIGN', (3, 0), (5, -1), 'RIGHT'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.HexColor('#F8F9FB'), rl_colors.white]),
+            ]))
+            elements.append(table)
+
+            total_amount = sum(inv["amount"] for inv in invoices)
+            total_paid = sum(inv.get("amount_paid", 0.0) for inv in invoices)
+            elements.append(Spacer(1, 12))
+            summary_data = [
+                ["Total Invoiced:", f"${total_amount:,.2f}"],
+                ["Total Paid:", f"${total_paid:,.2f}"],
+                ["Outstanding:", f"${(total_amount - total_paid):,.2f}"],
+            ]
+            summary = Table(summary_data, colWidths=[400, 120])
+            summary.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ]))
+            elements.append(summary)
+
+            doc.build(elements)
+            QMessageBox.information(self, "Export Successful", f"All invoices exported to:\n{path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", str(e))
 
 
 class PlaceholderPage(QWidget):
@@ -3460,7 +4012,9 @@ class MainWindow(QWidget):
             self._pages.addWidget(CalendarPage(self._repo, self._user))
             self._pages.addWidget(InvoicesPage(self._repo, self._user))
             from messaging import MessagingPage
-            self._pages.addWidget(MessagingPage(self._repo, self._user))
+            messaging_page = MessagingPage(self._repo, self._user)
+            messaging_page.case_link_clicked.connect(self._on_case_link_from_message)
+            self._pages.addWidget(messaging_page)
             if self._user["role"] == "lawyer":
                 from lawyer_reports import LawyerReportsPage
                 self._pages.addWidget(LawyerReportsPage(self._repo, self._user))
@@ -3494,6 +4048,13 @@ class MainWindow(QWidget):
             self._pages.setCurrentIndex(PAGE_CALENDAR)
             cal_page.navigate_to_date(date_str)
             self._header.refresh_badge()
+
+    def _on_case_link_from_message(self, case_id):
+        self._pages.setCurrentIndex(PAGE_CASES)
+        cases_page = self._pages.widget(PAGE_CASES)
+        if cases_page and hasattr(cases_page, "navigate_to_case"):
+            cases_page.navigate_to_case(case_id)
+        self._header.refresh_badge()
 
     def _handle_reset(self):
         self._repo.reset_to_defaults()

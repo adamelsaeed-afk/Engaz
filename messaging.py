@@ -109,11 +109,13 @@ class NewConversationDialog(QDialog):
 
 
 class MessageBubble(QFrame):
-    def __init__(self, content, is_sender, timestamp, parent=None):
-        super().__init__(parent)
-        self._build(content, is_sender, timestamp)
+    case_link_clicked = Signal(str)
 
-    def _build(self, content, is_sender, timestamp):
+    def __init__(self, content, is_sender, timestamp, case_link_id="", case_link_title="", parent=None):
+        super().__init__(parent)
+        self._build(content, is_sender, timestamp, case_link_id, case_link_title)
+
+    def _build(self, content, is_sender, timestamp, case_link_id, case_link_title):
         self.setStyleSheet("border: none; background: transparent;")
         outer = QHBoxLayout(self)
         outer.setContentsMargins(12, 4, 12, 4)
@@ -132,6 +134,27 @@ class MessageBubble(QFrame):
         bubble_layout = QVBoxLayout(bubble)
         bubble_layout.setContentsMargins(14, 8, 14, 8)
         bubble_layout.setSpacing(2)
+
+        if case_link_id and case_link_title:
+            case_badge = QPushButton(f"\U0001F4DC Case: {case_link_title}")
+            case_badge.setCursor(Qt.PointingHandCursor)
+            case_badge.setStyleSheet(f"""
+                QPushButton {{
+                    background: {'rgba(255,255,255,0.2)' if is_sender else '#DDE4EB'};
+                    color: {bubble_fg};
+                    border: none;
+                    border-radius: 6px;
+                    padding: 3px 8px;
+                    font-size: 11px;
+                    font-weight: bold;
+                    text-align: left;
+                }}
+                QPushButton:hover {{
+                    background: {'rgba(255,255,255,0.35)' if is_sender else '#C4D1DE'};
+                }}
+            """)
+            case_badge.clicked.connect(lambda: self.case_link_clicked.emit(case_link_id))
+            bubble_layout.addWidget(case_badge)
 
         text = QLabel(content)
         text.setWordWrap(True)
@@ -155,6 +178,7 @@ class MessageBubble(QFrame):
 
 class MessageThreadWidget(QWidget):
     message_sent = Signal(str, str, str)
+    case_link_clicked = Signal(str)
 
     def __init__(self, repo, user, parent=None):
         super().__init__(parent)
@@ -163,6 +187,7 @@ class MessageThreadWidget(QWidget):
         self._partner_id = None
         self._partner_name = ""
         self._case_id = ""
+        self._case_link_id = ""
         self._build()
 
     def _build(self):
@@ -195,16 +220,19 @@ class MessageThreadWidget(QWidget):
 
         input_area = QFrame()
         input_area.setStyleSheet(f"background: {WHITE}; border-top: 1px solid {BORDER};")
-        input_layout = QHBoxLayout(input_area)
-        input_layout.setContentsMargins(12, 8, 12, 8)
-        input_layout.setSpacing(8)
+        input_col = QVBoxLayout(input_area)
+        input_col.setContentsMargins(12, 8, 12, 8)
+        input_col.setSpacing(6)
+
+        input_row = QHBoxLayout()
+        input_row.setSpacing(8)
 
         self._input = QTextEdit()
         self._input.setPlaceholderText("Type a message...")
         self._input.setFixedHeight(50)
         self._input.setStyleSheet(f"padding: 6px; border: 1px solid {BORDER}; border-radius: 6px;"
                                   f" font-size: 13px; color: {TEXT_DARK}; background: {WHITE};")
-        input_layout.addWidget(self._input, stretch=1)
+        input_row.addWidget(self._input, stretch=1)
 
         send_btn = QPushButton("Send")
         send_btn.setFixedHeight(36)
@@ -212,7 +240,23 @@ class MessageThreadWidget(QWidget):
                                f" border-radius: 6px; padding: 0 18px; font-size: 13px; font-weight: bold; }}"
                                f"QPushButton:hover {{ background: {STEEL}; }}")
         send_btn.clicked.connect(self._send)
-        input_layout.addWidget(send_btn)
+        input_row.addWidget(send_btn)
+        input_col.addLayout(input_row)
+
+        link_row = QHBoxLayout()
+        link_row.setSpacing(6)
+        link_lbl = QLabel("Attach Case:")
+        link_lbl.setStyleSheet(f"font-size: 11px; color: {TEXT_GRAY}; border: none;")
+        link_row.addWidget(link_lbl)
+        self._case_link_combo = ArrowComboBox()
+        self._case_link_combo.addItem("(None)", "")
+        self._case_link_combo.setStyleSheet(f"""
+            QComboBox {{ padding: 3px 6px; border: 1px solid {BORDER}; border-radius: 4px;
+                          font-size: 11px; color: {TEXT_DARK}; background: {WHITE}; }}
+        """)
+        link_row.addWidget(self._case_link_combo, stretch=1)
+        link_row.addStretch()
+        input_col.addLayout(link_row)
 
         layout.addWidget(input_area)
 
@@ -224,6 +268,7 @@ class MessageThreadWidget(QWidget):
         self._partner_id = None
         self._partner_name = ""
         self._case_id = ""
+        self._case_link_id = ""
         self._input.setEnabled(False)
         self._clear_messages()
         placeholder = QLabel("Select a conversation to start messaging")
@@ -235,9 +280,21 @@ class MessageThreadWidget(QWidget):
         self._partner_id = partner_id
         self._partner_name = partner_name
         self._case_id = case_id
+        self._case_link_id = ""
         self._header_label.setText(partner_name)
         self._input.setEnabled(True)
         self._input.clear()
+
+        self._case_link_combo.clear()
+        self._case_link_combo.addItem("(None)", "")
+        cases = (self._repo.get_cases_for_lawyer(self._user["user_id"])
+                 if self._user["role"] == "lawyer"
+                 else self._repo.get_cases_for_client(self._user["user_id"]))
+        partner_field = "client_id" if self._user["role"] == "lawyer" else "lawyer_id"
+        shared = [c for c in cases if c[partner_field] == partner_id]
+        for c in shared:
+            self._case_link_combo.addItem(f"{c['case_number']} — {c['title']}", c["case_id"])
+
         if case_id:
             case = self._repo.get_case(case_id)
             cn = case["case_number"] if case else ""
@@ -259,9 +316,18 @@ class MessageThreadWidget(QWidget):
             messages = self._repo.get_messages_between(self._user["user_id"], self._partner_id)
         for msg in messages:
             is_sender = msg["sender_id"] == self._user["user_id"]
-            self._msg_layout.addWidget(
-                MessageBubble(msg["content"], is_sender, msg["created_at"])
+            cl_id = msg.get("case_link_id", "")
+            cl_title = ""
+            if cl_id:
+                linked_case = self._repo.get_case(cl_id)
+                if linked_case:
+                    cl_title = f"{linked_case.get('case_number', '')} - {linked_case.get('title', '')}"
+            bubble = MessageBubble(
+                msg["content"], is_sender, msg["created_at"],
+                case_link_id=cl_id, case_link_title=cl_title,
             )
+            bubble.case_link_clicked.connect(self.case_link_clicked.emit)
+            self._msg_layout.addWidget(bubble)
         self._msg_layout.addStretch()
         QTimer.singleShot(30, self._scroll_to_bottom)
 
@@ -279,11 +345,13 @@ class MessageThreadWidget(QWidget):
         if not content or not self._partner_id:
             return
         self._input.clear()
+        case_link_id = self._case_link_combo.currentData() if hasattr(self, "_case_link_combo") else ""
         msg = self._repo.create_message({
             "sender_id": self._user["user_id"],
             "receiver_id": self._partner_id,
             "content": content,
             "case_id": self._case_id,
+            "case_link_id": case_link_id,
         })
         self._repo.create_notification({
             "user_id": self._partner_id,
@@ -431,6 +499,8 @@ class ConversationListWidget(QWidget):
 
 
 class MessagingPage(QWidget):
+    case_link_clicked = Signal(str)
+
     def __init__(self, repo, user, parent=None):
         super().__init__(parent)
         self._repo = repo
@@ -487,6 +557,7 @@ class MessagingPage(QWidget):
 
         self._thread = MessageThreadWidget(self._repo, self._user)
         self._thread.message_sent.connect(self._on_message_sent)
+        self._thread.case_link_clicked.connect(self.case_link_clicked.emit)
         self._thread.setMinimumWidth(300)
         splitter.addWidget(self._thread)
 

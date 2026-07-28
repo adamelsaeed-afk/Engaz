@@ -39,7 +39,7 @@ sns.set_theme(style="whitegrid")
 ALL_METRIC_IDS = [
     "closing_rate", "revenue", "cases_by_status", "cases_by_department",
     "top_lawyers_closing", "top_lawyers_revenue", "workload",
-    "appointments", "client_trends",
+    "appointments", "client_trends", "case_win_loss", "overdue_invoices",
 ]
 
 METRIC_LABELS = {
@@ -52,6 +52,8 @@ METRIC_LABELS = {
     "workload": "Lawyer Workload",
     "appointments": "Appointment Completion",
     "client_trends": "Client Acquisition",
+    "case_win_loss": "Case Win / Loss",
+    "overdue_invoices": "Overdue Invoices",
 }
 
 
@@ -367,6 +369,8 @@ class StakeholderDashboardPage(QWidget):
             "workload": self._render_workload,
             "appointments": self._render_appointments,
             "client_trends": self._render_client_trends,
+            "case_win_loss": self._render_case_win_loss,
+            "overdue_invoices": self._render_overdue_invoices,
         }.get(mid)
         if fn:
             widget = _MetricWidget(mid, METRIC_LABELS[mid])
@@ -390,6 +394,8 @@ class StakeholderDashboardPage(QWidget):
             "workload": self._render_workload,
             "appointments": self._render_appointments,
             "client_trends": self._render_client_trends,
+            "case_win_loss": self._render_case_win_loss,
+            "overdue_invoices": self._render_overdue_invoices,
         }.get(mid)
         if fn is None:
             return
@@ -631,6 +637,64 @@ class StakeholderDashboardPage(QWidget):
             ax.spines["right"].set_visible(False)
         ax.set_title("Client Acquisition — New Cases Over Time", fontsize=12, fontweight="bold", color=TEXT_DARK, pad=8)
         ax.tick_params(colors=TEXT_GRAY, labelsize=9)
+        fig.tight_layout()
+        return fig
+
+    def _render_case_win_loss(self, data):
+        cases = data["cases"]
+        won = sum(1 for c in cases if c.get("status") == "Won")
+        lost = sum(1 for c in cases if c.get("status") == "Lost")
+        closed = sum(1 for c in cases if c.get("status") == "Closed")
+        total = won + lost + closed
+        if total == 0:
+            fig, ax = _make_figure(figsize=(7, 3.2))
+            ax.text(0.5, 0.5, "No resolved cases yet", ha="center", va="center",
+                    fontsize=13, color=TEXT_GRAY)
+            ax.set_title("Case Win / Loss", fontsize=12, fontweight="bold", color=TEXT_DARK, pad=8)
+            return fig
+        labels = ["Won", "Lost", "Closed"]
+        sizes = [won, lost, closed]
+        colors = [GREEN, RED, STEEL]
+        fig, ax = _make_figure(figsize=(7, 3.2))
+        wedges, texts, autotexts = ax.pie(
+            sizes, labels=None, autopct="%1.1f%%", startangle=90,
+            colors=colors, pctdistance=0.75,
+        )
+        for at in autotexts:
+            at.set_fontsize(11)
+            at.set_fontweight("bold")
+            at.set_color(WHITE)
+        centre_circle = plt.Circle((0, 0), 0.55, fc=WHITE)
+        ax.add_artist(centre_circle)
+        ax.text(0, 0, str(total), ha="center", va="center", fontsize=20, fontweight="bold", color=TEXT_DARK)
+        ax.legend(
+            wedges, [f"{l} ({s})" for l, s in zip(labels, sizes)],
+            loc="lower center", bbox_to_anchor=(0.5, -0.15), ncol=3,
+            fontsize=9, frameon=False,
+        )
+        ax.set_title("Case Win / Loss", fontsize=12, fontweight="bold", color=TEXT_DARK, pad=8)
+        fig.tight_layout()
+        return fig
+
+    def _render_overdue_invoices(self, data):
+        invoices = data.get("invoices", [])
+        overdue = [inv for inv in invoices if inv.get("status") == "Overdue"
+                   or (inv.get("status") != "Paid" and inv.get("due_date", "") < datetime.now().strftime("%Y-%m-%d"))]
+        count = len(overdue)
+        total = sum(inv["amount"] - inv.get("amount_paid", 0.0) for inv in overdue)
+        fig, ax = _make_figure(figsize=(7, 3.2))
+        ax.axis("off")
+        if count == 0:
+            ax.text(0.5, 0.5, "No overdue invoices", ha="center", va="center",
+                    fontsize=13, color=GREEN, fontweight="bold")
+        else:
+            ax.text(0.5, 0.65, str(count), ha="center", va="center",
+                    fontsize=40, fontweight="bold", color=RED, transform=ax.transAxes)
+            ax.text(0.5, 0.45, "overdue invoices", ha="center", va="center",
+                    fontsize=14, color=TEXT_DARK, transform=ax.transAxes)
+            ax.text(0.5, 0.25, f"Total Outstanding: ${total:,.2f}", ha="center", va="center",
+                    fontsize=16, fontweight="bold", color=AMBER, transform=ax.transAxes)
+        ax.set_title("Overdue Invoices", fontsize=12, fontweight="bold", color=TEXT_DARK, pad=8)
         fig.tight_layout()
         return fig
 
