@@ -13,13 +13,17 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QComboBox, QFileDialog, QCheckBox,
+    QScrollArea, QFrame, QFileDialog, QCheckBox,
     QGraphicsDropShadowEffect, QGridLayout, QSizePolicy, QDialog,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 
-from invoicesystem import ArrowComboBox
+from engaz_constants import (
+    NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
+    GREEN, AMBER, RED, BORDER, clear_layout,
+    ArrowComboBox, GLOBAL_QSS, BTN_PRIMARY_HOVER, BTN_SECONDARY_HOVER,
+)
 
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors as rl_colors
@@ -212,12 +216,9 @@ class StakeholderDashboardPage(QWidget):
         bl.addSpacing(16)
 
         bl.addWidget(QLabel("Scope:"))
-        self._scope_combo = ArrowComboBox()
+        self._scope_combo = ArrowComboBox(placeholder="Select scope...")
         self._populate_scope()
-        self._scope_combo.setStyleSheet(f"""
-            QComboBox {{ padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;
-                         font-size: 12px; color: {TEXT_DARK}; background: {WHITE}; }}
-        """)
+        self._scope_combo.setStyleSheet(GLOBAL_QSS)
         self._scope_combo.currentTextChanged.connect(self._on_scope_changed)
         bl.addWidget(self._scope_combo)
 
@@ -231,8 +232,7 @@ class StakeholderDashboardPage(QWidget):
         bl.addWidget(gear_btn)
 
         pdf_btn = QPushButton("Export PDF")
-        pdf_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
-                              f" border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: bold; }}")
+        pdf_btn.setStyleSheet(BTN_PRIMARY_HOVER)
         pdf_btn.clicked.connect(self._export_pdf)
         bl.addWidget(pdf_btn)
 

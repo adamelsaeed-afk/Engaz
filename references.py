@@ -4,17 +4,17 @@ import shutil
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QTextEdit, QScrollArea, QFrame, QDialog, QDialogButtonBox,
-    QTabWidget, QFileDialog, QSpinBox, QComboBox, QSizePolicy,
+    QTabWidget, QFileDialog, QSpinBox, QSizePolicy,
     QGraphicsDropShadowEffect, QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal, QUrl, QTimer
 from PySide6.QtGui import QColor, QDesktopServices
 
-from invoicesystem import ArrowComboBox
-
 from engaz_constants import (
     NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
     GREEN, AMBER, RED, BORDER, _format_time, clear_layout,
+    ArrowComboBox, GLOBAL_QSS, BTN_PRIMARY_HOVER, BTN_SECONDARY_HOVER,
+    create_required_label,
 )
 
 LAW_BOOKS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "law_books")
@@ -51,37 +51,41 @@ class AddBookDialog(QDialog):
         layout.addWidget(lbl)
 
         fields = [
-            ("Title *", QLineEdit()),
-            ("Author", QLineEdit()),
-            ("Edition", QLineEdit()),
-            ("ISBN", QLineEdit()),
+            ("Title", QLineEdit(), True),
+            ("Author", QLineEdit(), False),
+            ("Edition", QLineEdit(), False),
+            ("ISBN", QLineEdit(), False),
         ]
         self._inputs = {}
-        for label, widget in fields:
+        for label, widget, required in fields:
             row = QHBoxLayout()
-            rl = QLabel(label)
+            label_text = create_required_label(label) if required else label
+            rl = QLabel(label_text)
             rl.setFixedWidth(80)
             rl.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {TEXT_DARK}; border: none;")
             row.addWidget(rl)
-            widget.setStyleSheet(_field_style())
+            widget.setStyleSheet(GLOBAL_QSS)
+            if required:
+                widget.setPlaceholderText(f"Please enter a {label.lower()}")
             row.addWidget(widget, stretch=1)
             layout.addLayout(row)
-            self._inputs[label.replace(" *", "").lower()] = widget
+            self._inputs[label.lower()] = widget
 
         cat_row = QHBoxLayout()
         cat_row.addWidget(QLabel("Category"))
         cat_row.itemAt(0).widget().setFixedWidth(80)
         cat_row.itemAt(0).widget().setStyleSheet(f"font-size: 12px; font-weight: bold; color: {TEXT_DARK}; border: none;")
-        self._category = ArrowComboBox()
+        self._category = ArrowComboBox(placeholder="Select category...")
         self._category.addItems(["Corporate", "Penal", "Civil", "Labor", "Other"])
-        self._category.setStyleSheet(_field_style())
+        self._category.setStyleSheet(GLOBAL_QSS)
         cat_row.addWidget(self._category, stretch=1)
         layout.addLayout(cat_row)
 
         pdf_row = QHBoxLayout()
-        pdf_row.addWidget(QLabel("PDF File *"))
-        pdf_row.itemAt(0).widget().setFixedWidth(80)
-        pdf_row.itemAt(0).widget().setStyleSheet(f"font-size: 12px; font-weight: bold; color: {TEXT_DARK}; border: none;")
+        pdf_lbl = QLabel(create_required_label("PDF File"))
+        pdf_lbl.setFixedWidth(80)
+        pdf_lbl.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {TEXT_DARK}; border: none;")
+        pdf_row.addWidget(pdf_lbl)
         self._pdf_label = QLabel("No file selected")
         self._pdf_label.setStyleSheet(f"color: {TEXT_GRAY}; font-size: 12px; border: 1px solid {BORDER};"
                                       f" padding: 6px 8px; border-radius: 4px; background: {CARD_BG};")
@@ -97,12 +101,7 @@ class AddBookDialog(QDialog):
         layout.addStretch()
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.setStyleSheet(f"""
-            QPushButton {{ padding: 6px 16px; border-radius: 4px; font-size: 13px;
-                           color: {TEXT_DARK}; background: {WHITE};
-                           border: 1px solid {BORDER}; }}
-            QPushButton:hover {{ background: {CARD_BG}; }}
-        """)
+        buttons.setStyleSheet(BTN_PRIMARY_HOVER)
         buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -532,13 +531,13 @@ class BookListView(QWidget):
 
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search by title, author, or category...")
-        self._search.setStyleSheet(_field_style())
+        self._search.setStyleSheet(GLOBAL_QSS)
         self._search.textChanged.connect(self._on_search)
         filter_row.addWidget(self._search, stretch=1)
 
-        self._category_filter = QComboBox()
+        self._category_filter = ArrowComboBox(placeholder="All")
         self._category_filter.addItems(self.CATEGORIES)
-        self._category_filter.setStyleSheet(_field_style())
+        self._category_filter.setStyleSheet(GLOBAL_QSS)
         self._category_filter.currentTextChanged.connect(self._on_search)
         filter_row.addWidget(self._category_filter)
 

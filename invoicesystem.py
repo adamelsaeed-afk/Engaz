@@ -27,7 +27,7 @@ from engaz_constants import (
     PAGE_DASHBOARD, PAGE_CASES, PAGE_CALENDAR, PAGE_INVOICES,
     PAGE_MESSAGES, PAGE_REPORTS, PAGE_LAW_LIBRARY, PAGE_STAKEHOLDER_DASHBOARD,
     NOTIFICATION_PAGE, _status_badge, clear_layout, _client_display_name,
-    ArrowComboBox, GLOBAL_QSS, BTN_PRIMARY_HOVER, BTN_SECONDARY_HOVER,
+    ArrowComboBox, ArrowDateEdit, GLOBAL_QSS, BTN_PRIMARY_HOVER, BTN_SECONDARY_HOVER,
     BTN_DESTRUCTIVE_HOVER, create_required_label,
 )
 
@@ -53,12 +53,11 @@ def _minutes_since_midnight(time_str):
     return int(parts[0]) * 60 + int(parts[1])
 
 
-class LeftAlignedDateEdit(QDateEdit):
-    """QDateEdit whose calendar popup opens aligned to the left of the widget."""
+class LeftAlignedDateEdit(ArrowDateEdit):
+    """QDateEdit with custom chevron arrow and left-aligned calendar popup."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setCalendarPopup(True)
         cal = self.calendarWidget()
         if cal:
             cal.installEventFilter(self)
@@ -1891,7 +1890,7 @@ class CaseForm(QDialog):
         grid.addWidget(label, r, 0)
         self._case_date_input = LeftAlignedDateEdit()
         self._case_date_input.setDate(QDate.currentDate())
-        self._case_date_input.setStyleSheet(self._field_style())
+        self._case_date_input.setStyleSheet(GLOBAL_QSS)
         grid.addWidget(self._case_date_input, r, 1)
         r += 1
 
@@ -1918,7 +1917,7 @@ class CaseForm(QDialog):
         grid.addWidget(label, r, 0)
         self._filing_date_input = LeftAlignedDateEdit()
         self._filing_date_input.setDate(QDate.currentDate())
-        self._filing_date_input.setStyleSheet(self._field_style())
+        self._filing_date_input.setStyleSheet(GLOBAL_QSS)
         grid.addWidget(self._filing_date_input, r, 1)
         r += 1
 
@@ -2132,7 +2131,9 @@ class Casepagemain(QWidget):
         bar.addStretch()
 
         new_btn = QPushButton("+ New Case")
-        new_btn.setStyleSheet(BTN_PRIMARY_HOVER)
+        new_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none; border-radius: 4px;"
+                              f" padding: 8px 18px; font-size: 13px; font-weight: bold; }}"
+                              f"QPushButton:hover {{ background: {STEEL}; }}")
         new_btn.clicked.connect(self._open_create_dialog)
         bar.addWidget(new_btn)
 
@@ -2676,7 +2677,9 @@ class CalendarPage(QWidget):
         header.addStretch()
         if not self._is_lawyer:
             new_btn = QPushButton("+ Request Appointment")
-            new_btn.setStyleSheet(BTN_PRIMARY_HOVER)
+            new_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
+                                  f" border-radius: 4px; padding: 8px 16px; font-size: 12px; font-weight: bold; }}"
+                                  f"QPushButton:hover {{ background: {STEEL}; }}")
             new_btn.clicked.connect(self._open_create)
             header.addWidget(new_btn)
         right.addLayout(header)
@@ -2863,13 +2866,13 @@ class CalendarPage(QWidget):
 
         if self._is_lawyer and appt["status"] == "Requested":
             decline_btn = QPushButton("Decline")
-            decline_btn.setFixedHeight(28)
+            decline_btn.setFixedHeight(22)
             decline_btn.setStyleSheet(btn_no_border % (RED, RED, WHITE))
             decline_btn.clicked.connect(lambda chk, a=appt, ac=actions: self._decline(a, ac))
             actions_layout.addWidget(decline_btn)
 
             approve_btn = QPushButton("Approve")
-            approve_btn.setFixedHeight(28)
+            approve_btn.setFixedHeight(22)
             approve_btn.setStyleSheet("""
             QPushButton {
                 background: %s;
@@ -2897,7 +2900,7 @@ class CalendarPage(QWidget):
 
         if self._is_lawyer and appt["status"] == "Approved":
             complete_btn = QPushButton("Complete")
-            complete_btn.setFixedHeight(28)
+            complete_btn.setFixedHeight(22)
             complete_btn.setStyleSheet("""
             QPushButton {
                 background: %s;
@@ -2924,14 +2927,14 @@ class CalendarPage(QWidget):
             actions_layout.addWidget(complete_btn)
 
             noshow_btn = QPushButton("No Show")
-            noshow_btn.setFixedHeight(28)
+            noshow_btn.setFixedHeight(22)
             noshow_btn.setStyleSheet(btn_no_border % (AMBER, AMBER, WHITE))
             noshow_btn.clicked.connect(lambda chk, a=appt, ac=actions: self._no_show(a, ac))
             actions_layout.addWidget(noshow_btn)
 
         if not self._is_lawyer and appt["status"] == "Requested":
             cancel_btn = QPushButton("Cancel")
-            cancel_btn.setFixedHeight(28)
+            cancel_btn.setFixedHeight(22)
             cancel_btn.setStyleSheet(btn_no_border % (RED, RED, WHITE))
             cancel_btn.clicked.connect(lambda chk, a=appt, ac=actions: self._cancel(a, ac))
             actions_layout.addWidget(cancel_btn)
@@ -3108,7 +3111,7 @@ class InvoiceFormDialog(QDialog):
             client = self._repo.get_user(c["client_id"])
             cn = _client_display_name(client)
             self._case.addItem(f"{c['case_number']} – {c['title']} ({cn})", c["case_id"])
-        self._case.setStyleSheet(self._fs())
+        self._case.setStyleSheet(GLOBAL_QSS)
         self._case.currentIndexChanged.connect(self._on_case_changed)
         grid.addWidget(self._case, r, 1)
         r += 1
@@ -3151,14 +3154,14 @@ class InvoiceFormDialog(QDialog):
         grid.addWidget(self._required_lbl("Due Date:"), r, 0)
         self._due = LeftAlignedDateEdit()
         self._due.setDate(QDate.currentDate().addDays(30))
-        self._due.setStyleSheet(self._fs())
+        self._due.setStyleSheet(GLOBAL_QSS)
         grid.addWidget(self._due, r, 1)
         r += 1
 
         grid.addWidget(self._lbl("Status:"), r, 0)
         self._status = ArrowComboBox(placeholder="Select status...")
         self._status.addItems(["Draft", "Sent"])
-        self._status.setStyleSheet(self._fs())
+        self._status.setStyleSheet(GLOBAL_QSS)
         grid.addWidget(self._status, r, 1)
         r += 1
 
@@ -3623,7 +3626,9 @@ class InvoicesPage(QWidget):
         header.addStretch()
         if self._is_lawyer:
             new_btn = QPushButton("+ New Invoice")
-            new_btn.setStyleSheet(BTN_PRIMARY_HOVER)
+            new_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
+                                  f" border-radius: 4px; padding: 8px 18px; font-size: 13px; font-weight: bold; }}"
+                                  f"QPushButton:hover {{ background: {STEEL}; }}")
             new_btn.clicked.connect(self._open_create)
             header.addWidget(new_btn)
         export_btn = QPushButton("Export All PDF")

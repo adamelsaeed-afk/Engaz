@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QTextEdit, QScrollArea, QFrame, QDialog, QComboBox, QDialogButtonBox,
+    QTextEdit, QScrollArea, QFrame, QDialog, QDialogButtonBox,
     QSizePolicy, QSplitter,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
@@ -8,9 +8,9 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from engaz_constants import (
     NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
     GREEN, AMBER, RED, BORDER, _format_time, clear_layout,
+    ArrowComboBox, GLOBAL_QSS, BTN_PRIMARY_HOVER, BTN_SECONDARY_HOVER,
+    create_required_label,
 )
-
-from invoicesystem import ArrowComboBox
 
 
 class NewConversationDialog(QDialog):
@@ -35,24 +35,16 @@ class NewConversationDialog(QDialog):
         lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {TEXT_DARK}; border: none;")
         layout.addWidget(lbl)
 
-        self._contact_combo = ArrowComboBox()
-        self._contact_combo.setStyleSheet(f"""
-            QComboBox {{ padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px;
-                          font-size: 13px; color: {TEXT_DARK}; background: {WHITE}; }}
-            QComboBox:focus {{ border-color: {STEEL}; }}
-        """)
+        self._contact_combo = ArrowComboBox(placeholder="Select a contact...")
+        self._contact_combo.setStyleSheet(GLOBAL_QSS)
         layout.addWidget(self._contact_combo)
 
         case_lbl = QLabel("Link to case (optional):")
         case_lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_GRAY}; border: none;")
         layout.addWidget(case_lbl)
 
-        self._case_combo = ArrowComboBox()
-        self._case_combo.setStyleSheet(f"""
-            QComboBox {{ padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px;
-                          font-size: 13px; color: {TEXT_DARK}; background: {WHITE}; }}
-            QComboBox:focus {{ border-color: {STEEL}; }}
-        """)
+        self._case_combo = ArrowComboBox(placeholder="(No case — direct message)")
+        self._case_combo.setStyleSheet(GLOBAL_QSS)
         self._case_combo.addItem("(No case — direct message)", "")
         layout.addWidget(self._case_combo)
 
@@ -236,9 +228,7 @@ class MessageThreadWidget(QWidget):
 
         send_btn = QPushButton("Send")
         send_btn.setFixedHeight(36)
-        send_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
-                               f" border-radius: 6px; padding: 0 18px; font-size: 13px; font-weight: bold; }}"
-                               f"QPushButton:hover {{ background: {STEEL}; }}")
+        send_btn.setStyleSheet(BTN_PRIMARY_HOVER)
         send_btn.clicked.connect(self._send)
         input_row.addWidget(send_btn)
         input_col.addLayout(input_row)
@@ -248,12 +238,9 @@ class MessageThreadWidget(QWidget):
         link_lbl = QLabel("Attach Case:")
         link_lbl.setStyleSheet(f"font-size: 11px; color: {TEXT_GRAY}; border: none;")
         link_row.addWidget(link_lbl)
-        self._case_link_combo = ArrowComboBox()
+        self._case_link_combo = ArrowComboBox(placeholder="(None)")
         self._case_link_combo.addItem("(None)", "")
-        self._case_link_combo.setStyleSheet(f"""
-            QComboBox {{ padding: 3px 6px; border: 1px solid {BORDER}; border-radius: 4px;
-                          font-size: 11px; color: {TEXT_DARK}; background: {WHITE}; }}
-        """)
+        self._case_link_combo.setStyleSheet(GLOBAL_QSS)
         link_row.addWidget(self._case_link_combo, stretch=1)
         link_row.addStretch()
         input_col.addLayout(link_row)

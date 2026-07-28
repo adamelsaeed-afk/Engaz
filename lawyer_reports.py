@@ -20,7 +20,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QComboBox, QDateEdit, QFileDialog,
+    QScrollArea, QFrame, QFileDialog,
     QGraphicsDropShadowEffect, QMessageBox, QDialog, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QDate, Signal
@@ -29,9 +29,10 @@ from PySide6.QtGui import QColor
 from engaz_constants import (
     NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
     GREEN, AMBER, RED, BORDER, clear_layout,
+    ArrowComboBox, ArrowDateEdit, GLOBAL_QSS, BTN_PRIMARY_HOVER, BTN_SECONDARY_HOVER,
 )
 
-from invoicesystem import ArrowComboBox, LeftAlignedDateEdit
+from invoicesystem import LeftAlignedDateEdit
 
 PALETTE = [NAVY, STEEL, GREEN, AMBER, RED, "#8B5CF6", "#EC4899"]
 
@@ -180,11 +181,11 @@ class _ChartPanel(QFrame):
         header.addWidget(title_lbl)
 
         types = CHART_TYPES.get(metric_key, ["Bar"])
-        self._type_combo = ArrowComboBox()
+        self._type_combo = ArrowComboBox(placeholder="Chart type...")
         self._type_combo.addItems(types)
         self._type_combo.setCurrentText(DEFAULT_CHARTS.get(metric_key, types[0]))
         self._type_combo.setStyleSheet(f"""
-            QComboBox {{ padding: 2px 6px; border: 1px solid {BORDER}; border-radius: 4px;
+            QComboBox {{ padding: 2px 24px 2px 6px; border: 1px solid {BORDER}; border-radius: 4px;
                          font-size: 11px; color: {TEXT_DARK}; background: {WHITE}; }}
         """)
         self._type_combo.currentTextChanged.connect(
@@ -279,10 +280,10 @@ class LawyerReportsPage(QWidget):
         bar_layout.addWidget(heading)
         bar_layout.addSpacing(16)
 
-        self._range_combo = ArrowComboBox()
+        self._range_combo = ArrowComboBox(placeholder="Select period...")
         self._range_combo.addItems(["Last 30 days", "Last 90 days", "Last year", "All time", "Custom"])
         self._range_combo.setStyleSheet(f"""
-            QComboBox {{ padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;
+            QComboBox {{ padding: 4px 24px 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;
                          font-size: 12px; color: {TEXT_DARK}; background: {WHITE}; }}
         """)
         self._range_combo.currentTextChanged.connect(self._on_range_changed)
@@ -303,10 +304,10 @@ class LawyerReportsPage(QWidget):
 
         bar_layout.addSpacing(8)
         bar_layout.addWidget(QLabel("Type:"))
-        self._type_combo = ArrowComboBox()
+        self._type_combo = ArrowComboBox(placeholder="All types...")
         self._type_combo.addItems(["All", "criminal", "civil", "corporate", "family"])
         self._type_combo.setStyleSheet(f"""
-            QComboBox {{ padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;
+            QComboBox {{ padding: 4px 24px 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;
                          font-size: 12px; color: {TEXT_DARK}; background: {WHITE}; }}
         """)
         self._type_combo.currentTextChanged.connect(self._on_filter_changed)
@@ -502,11 +503,11 @@ class LawyerReportsPage(QWidget):
             ch_title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_DARK}; border: none;")
             ch_header.addWidget(ch_title)
             types = CHART_TYPES.get(metric_key, ["Bar"])
-            ch_combo = ArrowComboBox()
+            ch_combo = ArrowComboBox(placeholder="Chart type...")
             ch_combo.addItems(types)
             ch_combo.setCurrentText(panel.chart_type())
             ch_combo.setStyleSheet(f"""
-                QComboBox {{ padding: 3px 8px; border: 1px solid {BORDER}; border-radius: 4px;
+                QComboBox {{ padding: 3px 24px 3px 8px; border: 1px solid {BORDER}; border-radius: 4px;
                              font-size: 12px; color: {TEXT_DARK}; background: {WHITE}; }}
             """)
             ch_header.addWidget(QLabel("Chart:"))
@@ -514,9 +515,7 @@ class LawyerReportsPage(QWidget):
             ch_header.addStretch()
 
             ch_export = QPushButton("Export")
-            ch_export.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
-                                    f" border-radius: 4px; padding: 5px 14px; font-size: 11px; font-weight: bold; }}"
-                                    f"QPushButton:hover {{ background: {STEEL}; }}")
+            ch_export.setStyleSheet(BTN_PRIMARY_HOVER)
             ch_export.clicked.connect(lambda: export_this_chart())
             ch_header.addWidget(ch_export)
             dlg_layout.addLayout(ch_header)

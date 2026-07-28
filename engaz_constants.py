@@ -91,7 +91,7 @@ def _format_time(iso_string):
 
 GLOBAL_QSS = """
 /* ── Inputs ───────────────────────────────────── */
-QLineEdit, QTextEdit, QSpinBox, QDateEdit {
+QLineEdit, QTextEdit, QSpinBox {
     padding: 8px 12px;
     border: 1px solid """ + BORDER + """;
     border-radius: 6px;
@@ -101,10 +101,28 @@ QLineEdit, QTextEdit, QSpinBox, QDateEdit {
     selection-background-color: """ + STEEL + """;
     selection-color: """ + WHITE + """;
 }
-QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QDateEdit:focus {
+QLineEdit:focus, QTextEdit:focus, QSpinBox:focus {
     border: 1.5px solid """ + STEEL + """;
 }
-QLineEdit:disabled, QTextEdit:disabled, QSpinBox:disabled, QDateEdit:disabled {
+QLineEdit:disabled, QTextEdit:disabled, QSpinBox:disabled {
+    background: """ + LIGHT_GRAY + """;
+    color: """ + TEXT_GRAY + """;
+}
+
+QDateEdit {
+    padding: 8px 28px 8px 12px;
+    border: 1px solid """ + BORDER + """;
+    border-radius: 6px;
+    background: """ + WHITE + """;
+    color: """ + TEXT_DARK + """;
+    font-size: 13px;
+    selection-background-color: """ + STEEL + """;
+    selection-color: """ + WHITE + """;
+}
+QDateEdit:focus {
+    border: 1.5px solid """ + STEEL + """;
+}
+QDateEdit:disabled {
     background: """ + LIGHT_GRAY + """;
     color: """ + TEXT_GRAY + """;
 }
@@ -272,11 +290,20 @@ class ArrowComboBox(QComboBox):
         self.setPlaceholderText(placeholder)
         self._hovered = False
         self.setMouseTracking(True)
-        self.setStyleSheet("QComboBox::drop-down { border: none; background: transparent; }"
-                           "QComboBox::down-arrow { image: none; }")
+        super().setStyleSheet(self._arrow_hiding_rules())
         self._apply_popup_style()
         self.currentIndexChanged.connect(lambda _: self._on_index_changed())
         self.installEventFilter(self)
+
+    def _arrow_hiding_rules(self):
+        return ("QComboBox::drop-down { width: 0px; border: none; background: transparent; }"
+                "QComboBox::down-arrow { image: none; }")
+
+    def setStyleSheet(self, stylesheet):
+        sheet = stylesheet or ""
+        if "down-arrow" not in sheet:
+            sheet += self._arrow_hiding_rules()
+        super().setStyleSheet(sheet)
 
     def _apply_popup_style(self):
         self.view().window().setCursor(Qt.PointingHandCursor)
@@ -314,6 +341,62 @@ class ArrowComboBox(QComboBox):
 
     def _on_index_changed(self):
         pass
+
+
+# ── ArrowDateEdit ───────────────────────────────────────────────────────────
+
+class ArrowDateEdit(QDateEdit):
+    """QDateEdit with a custom-painted chevron arrow (matches ArrowComboBox)."""
+
+    _ARROW_COLOR = QColor(TEXT_GRAY)
+    _ARROW_HOVER_COLOR = QColor(STEEL)
+    _ARROW_SIZE = 10
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._hovered = False
+        self.setMouseTracking(True)
+        self.setCalendarPopup(True)
+        super().setStyleSheet(self._arrow_hiding_rules())
+        self.installEventFilter(self)
+
+    def _arrow_hiding_rules(self):
+        return ("QAbstractSpinBox::drop-down { border: none; background: transparent; }"
+                "QAbstractSpinBox::down-arrow { image: none; width: 0px; }")
+
+    def setStyleSheet(self, stylesheet):
+        sheet = stylesheet or ""
+        if "down-arrow" not in sheet:
+            sheet += self._arrow_hiding_rules()
+        super().setStyleSheet(sheet)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        color = self._ARROW_HOVER_COLOR if self._hovered else self._ARROW_COLOR
+        painter.setPen(QPen(color, 2))
+        painter.setBrush(QBrush(color))
+        right_margin = 12
+        arrow_left = self.width() - right_margin - self._ARROW_SIZE
+        arrow_top = (self.height() - self._ARROW_SIZE // 2) // 2
+        points = [
+            QPoint(arrow_left, arrow_top),
+            QPoint(arrow_left + self._ARROW_SIZE, arrow_top),
+            QPoint(arrow_left + self._ARROW_SIZE // 2, arrow_top + self._ARROW_SIZE // 2),
+        ]
+        painter.drawPolygon(points)
+        painter.end()
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
 
 
 # ── Required Label Helper ───────────────────────────────────────────────────

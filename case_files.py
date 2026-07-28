@@ -4,8 +4,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QDialog, QFileDialog, QFrame, QScrollArea, QGridLayout, QSizePolicy,
-    QMenu, QMessageBox, QCheckBox, QLineEdit, QDateEdit, QTextEdit,
-    QComboBox, QDialogButtonBox,
+    QMenu, QMessageBox, QCheckBox, QLineEdit, QTextEdit,
+    QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, Signal, QUrl, QDate
 from PySide6.QtGui import QDesktopServices
@@ -13,6 +13,8 @@ from PySide6.QtGui import QDesktopServices
 from engaz_constants import (
     NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
     GREEN, AMBER, RED, BORDER, _status_badge, _client_display_name,
+    ArrowComboBox, ArrowDateEdit, GLOBAL_QSS, BTN_PRIMARY_HOVER,
+    BTN_SECONDARY_HOVER, BTN_DESTRUCTIVE_HOVER, create_required_label,
 )
 
 
@@ -133,7 +135,7 @@ class CaseFileListWidget(QWidget):
             QTableWidget {{ background: {WHITE}; border: 1px solid {BORDER}; border-radius: 4px;
                             gridline-color: {BORDER}; font-size: 12px; }}
             QTableWidget::item {{ padding: 4px 8px; color: {TEXT_DARK}; }}
-            QHeaderView::section {{ background: {STEEL}; color: {WHITE}; padding: 6px;
+            QHeaderView::section {{ background: {NAVY}; color: {WHITE}; padding: 6px;
                                     font-weight: bold; border: none; font-size: 11px; }}
             QTableWidget::item:alternate {{ background: #F8F9FB; }}
         """)
@@ -279,16 +281,17 @@ class TaskFormDialog(QDialog):
         layout.setSpacing(8)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("Title:"))
+        row.addWidget(QLabel(create_required_label("Title:")))
         self._title = QLineEdit()
-        self._title.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        self._title.setPlaceholderText("Please enter a task title")
+        self._title.setStyleSheet(GLOBAL_QSS)
         row.addWidget(self._title, stretch=1)
         layout.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Assigned To:"))
-        self._assigned = QComboBox()
-        self._assigned.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        self._assigned = ArrowComboBox(placeholder="Select assignee...")
+        self._assigned.setStyleSheet(GLOBAL_QSS)
         case = self._repo.get_case(self._case_id)
         if case:
             client = self._repo.get_user(case["client_id"])
@@ -302,17 +305,16 @@ class TaskFormDialog(QDialog):
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Due Date:"))
-        self._due_date = QDateEdit()
-        self._due_date.setCalendarPopup(True)
+        self._due_date = ArrowDateEdit()
         self._due_date.setDate(QDate.currentDate())
-        self._due_date.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        self._due_date.setStyleSheet(GLOBAL_QSS)
         row.addWidget(self._due_date, stretch=1)
         layout.addLayout(row)
 
         layout.addWidget(QLabel("Description:"))
         self._desc = QTextEdit()
         self._desc.setMaximumHeight(60)
-        self._desc.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        self._desc.setStyleSheet(GLOBAL_QSS)
         layout.addWidget(self._desc)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -482,32 +484,32 @@ class TimelineFormDialog(QDialog):
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Event Type:"))
-        self._event_type = QComboBox()
+        self._event_type = ArrowComboBox(placeholder="Select event type...")
         self._event_type.addItems(self.EVENTS)
-        self._event_type.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        self._event_type.setStyleSheet(GLOBAL_QSS)
         row.addWidget(self._event_type, stretch=1)
         layout.addLayout(row)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("Title:"))
+        row.addWidget(QLabel(create_required_label("Title:")))
         self._title = QLineEdit()
-        self._title.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        self._title.setPlaceholderText("Please enter an event title")
+        self._title.setStyleSheet(GLOBAL_QSS)
         row.addWidget(self._title, stretch=1)
         layout.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Event Date:"))
-        self._event_date = QDateEdit()
-        self._event_date.setCalendarPopup(True)
+        self._event_date = ArrowDateEdit()
         self._event_date.setDate(QDate.currentDate())
-        self._event_date.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        self._event_date.setStyleSheet(GLOBAL_QSS)
         row.addWidget(self._event_date, stretch=1)
         layout.addLayout(row)
 
         layout.addWidget(QLabel("Description:"))
         self._desc = QTextEdit()
         self._desc.setMaximumHeight(60)
-        self._desc.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        self._desc.setStyleSheet(GLOBAL_QSS)
         layout.addWidget(self._desc)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
