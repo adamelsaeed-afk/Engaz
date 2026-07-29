@@ -463,7 +463,28 @@ class DataRepository:
                 continue
             if a["date"] != date_str:
                 continue
-            if a["status"] not in ("Approved",):
+            if a["status"] in ("Declined", "Cancelled", "No Show", "Completed"):
+                continue
+            if exclude_id and a["appointment_id"] == exclude_id:
+                continue
+            a_start = _minutes_since_midnight(a["start_time"])
+            a_end = a_start + a["duration_minutes"]
+            if start_min < a_end and end_min > a_start:
+                return dict(a)
+        return None
+
+    def find_client_appointment_conflict(self, query):
+        client_id = query["client_id"]
+        date_str = query["date"]
+        start_min = _minutes_since_midnight(query["start_time"])
+        end_min = start_min + query["duration_minutes"]
+        exclude_id = query.get("exclude_id", "")
+        for a in self._data["appointments"]:
+            if a["client_id"] != client_id:
+                continue
+            if a["date"] != date_str:
+                continue
+            if a["status"] in ("Declined", "Cancelled", "No Show", "Completed"):
                 continue
             if exclude_id and a["appointment_id"] == exclude_id:
                 continue
@@ -497,6 +518,30 @@ class DataRepository:
 
     def upcoming_appointments_for_client(self, client_id, limit=3):
         return self.upcoming_appointments_for_user(client_id, "client", limit)
+
+    def get_appointments_for_tomorrow(self):
+        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        return [dict(a) for a in self._data["appointments"]
+                if a["date"] == tomorrow and a["status"] in ("Approved",)]
+
+    def send_appointment_reminders(self):
+        appts = self.get_appointments_for_tomorrow()
+        for a in appts:
+            self.create_notification({
+                "user_id": a["client_id"],
+                "title": "Appointment Reminder",
+                "message": f"Reminder: You have an appointment '{a['title']}' scheduled for tomorrow.",
+                "notification_type": "appointment_reminder",
+                "reference_id": a["appointment_id"],
+            })
+            self.create_notification({
+                "user_id": a["lawyer_id"],
+                "title": "Appointment Reminder",
+                "message": f"Reminder: You have an appointment '{a['title']}' with a client tomorrow.",
+                "notification_type": "appointment_reminder",
+                "reference_id": a["appointment_id"],
+            })
+        return len(appts)
 
     # ── Invoice methods ──────────────────────────────────────────────────
 
@@ -546,6 +591,13 @@ class DataRepository:
 
     def count_unpaid_invoices(self):
         return sum(1 for inv in self._data["invoices"] if inv["status"] != "Paid")
+
+    def total_money_made(self, lawyer_id=None):
+        invoices = self._data["invoices"]
+        if lawyer_id:
+            invoices = [inv for inv in invoices if inv.get("lawyer_id") == lawyer_id]
+        return sum(inv.get("amount_paid", 0.0) for inv in invoices
+                   if inv["status"] in ("Paid", "Partially Paid"))
 
     def unpaid_invoices_for_client(self, client_id):
         result = [inv for inv in self._data["invoices"]
@@ -1343,7 +1395,7 @@ class Sidebar(QFrame):
         if self._role == "lawyer":
             layout.addWidget(self._make_bottom_button("🔄  Reset Data", "🔄", self._confirm_reset))
 
-        layout.addWidget(self._make_bottom_button("🚪  Logout", "🚪", lambda: self.page_selected.emit(-1)))
+        layout.addWidget(self._make_bottom_button("🚪  Logout", "🚪", self._confirm_logout))
         layout.addSpacing(4)
         self._update_button_styles()
 
@@ -1382,6 +1434,13 @@ class Sidebar(QFrame):
                 btn.setText(self._icon_texts[i][1])
         self._update_button_styles()
 
+    def select_page_by_page_number(self, page):
+        for idx, (_, _, p) in enumerate(self.MENUS.get(self._role, [])):
+            if p == page:
+                self._active_index = idx
+                self._update_button_styles()
+                return
+
     def _select_page(self, page, index):
         self._active_index = index
         self._update_button_styles()
@@ -1399,6 +1458,36 @@ class Sidebar(QFrame):
         )
         if answer == QMessageBox.Yes:
             self.reset_requested.emit()
+
+    def _confirm_logout(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Confirm Logout")
+        dlg.setFixedSize(380, 160)
+        dlg.setStyleSheet(f"background: {WHITE};")
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(24, 20, 24, 16)
+        layout.setSpacing(12)
+
+        msg = QLabel("Are you sure you want to log out?")
+        msg.setStyleSheet(f"font-size: 14px; color: {TEXT_DARK}; border: none;")
+        msg.setAlignment(Qt.AlignCenter)
+        layout.addWidget(msg)
+        layout.addStretch()
+
+        btns = QHBoxLayout()
+        btns.addStretch()
+        no_btn = QPushButton("No")
+        no_btn.setStyleSheet(BTN_SECONDARY_HOVER)
+        no_btn.clicked.connect(dlg.reject)
+        btns.addWidget(no_btn)
+        yes_btn = QPushButton("Yes")
+        yes_btn.setStyleSheet(BTN_PRIMARY_HOVER)
+        yes_btn.clicked.connect(dlg.accept)
+        btns.addWidget(yes_btn)
+        layout.addLayout(btns)
+
+        if dlg.exec() == QDialog.Accepted:
+            self.page_selected.emit(-1)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1649,6 +1738,7 @@ class DashboardPage(QWidget):
         uid = self._user["user_id"]
         if self._user["role"] == "lawyer":
             vals = [
+                f"${self._repo.total_money_made(uid):,.2f}",
                 self._repo.count_active_cases_for_lawyer(uid),
                 self._repo.count_pending_appointments_for_lawyer(uid),
                 self._repo.count_unpaid_invoices(),
@@ -1687,6 +1777,10 @@ class DashboardPage(QWidget):
         uid = self._user["user_id"]
         cards = QHBoxLayout()
         cards.setSpacing(16)
+        revenue = self._repo.total_money_made(uid)
+        c0 = StatCard("Total Money Made", f"${revenue:,.2f}", GREEN)
+        c0.setCursor(Qt.PointingHandCursor)
+        c0.clicked.connect(lambda: self.navigate_to.emit(PAGE_INVOICES))
         c1 = StatCard("Active Cases", self._repo.count_active_cases_for_lawyer(uid))
         c1.setCursor(Qt.PointingHandCursor)
         c1.clicked.connect(lambda: self.navigate_to.emit(PAGE_CASES))
@@ -1699,7 +1793,8 @@ class DashboardPage(QWidget):
         c4 = StatCard("Unread Notifications", self._repo.unread_notification_count(uid), RED)
         c4.setCursor(Qt.PointingHandCursor)
         c4.clicked.connect(lambda: self.toggle_notifications.emit())
-        self._stat_cards = [c1, c2, c3, c4]
+        self._stat_cards = [c0, c1, c2, c3, c4]
+        cards.addWidget(c0)
         cards.addWidget(c1)
         cards.addWidget(c2)
         cards.addWidget(c3)
@@ -2354,6 +2449,7 @@ class MonthCalendar(QFrame):
         self._month = self._today.month
         self._selected = self._today.strftime("%Y-%m-%d")
         self._appt_dates = set()
+        self._finished_dates = set()
         self._day_btns = []
         self._build()
         self._render()
@@ -2418,6 +2514,10 @@ class MonthCalendar(QFrame):
         self._appt_dates = set(dates)
         self._render()
 
+    def set_finished_dates(self, dates):
+        self._finished_dates = set(dates)
+        self._render()
+
     def set_month(self, year, month):
         self._year = int(year)
         self._month = int(month)
@@ -2462,6 +2562,9 @@ class MonthCalendar(QFrame):
             if ds == self._selected:
                 btn.setText(str(day))
                 bg = f"background: {NAVY}; color: {WHITE}; border: none"
+            elif ds in self._finished_dates:
+                btn.setText(str(day))
+                bg = f"background: #D1FAE5; color: #065F46; font-weight: bold; border: 1px solid #A7F3D0"
             elif ds == today_str:
                 btn.setText(str(day))
                 bg = f"background: transparent; color: {NAVY}; border: 2px solid {NAVY}; font-weight: bold"
@@ -2576,6 +2679,14 @@ class AppointmentDialog(QDialog):
         layout.addLayout(grid)
         self._error = _ErrorLabel()
         layout.addWidget(self._error)
+        self._conflict_warning = QLabel()
+        self._conflict_warning.setVisible(False)
+        self._conflict_warning.setWordWrap(True)
+        self._conflict_warning.setStyleSheet(
+            f"background: #FDECEC; color: #B91C1C; border: 1px solid #F5C2C7;"
+            f" border-radius: 4px; padding: 8px 10px; font-size: 12px; font-weight: bold;"
+        )
+        layout.addWidget(self._conflict_warning)
         layout.addStretch()
 
         btns = QHBoxLayout()
@@ -2584,11 +2695,60 @@ class AppointmentDialog(QDialog):
         cancel.setStyleSheet(BTN_SECONDARY_HOVER)
         cancel.clicked.connect(self.reject)
         btns.addWidget(cancel)
-        save = QPushButton("Save Appointment")
-        save.setStyleSheet(BTN_PRIMARY_HOVER)
-        save.clicked.connect(self._try_save)
-        btns.addWidget(save)
+        self._save_btn = QPushButton("Save Appointment")
+        self._save_btn.setStyleSheet(BTN_PRIMARY_HOVER)
+        self._save_btn.clicked.connect(self._try_save)
+        btns.addWidget(self._save_btn)
         layout.addLayout(btns)
+
+        if not self._is_lawyer:
+            self._time.currentIndexChanged.connect(self._check_conflict)
+            self._duration.currentIndexChanged.connect(self._check_conflict)
+            if hasattr(self, "_lawyer"):
+                self._lawyer.currentIndexChanged.connect(self._check_conflict)
+
+    def _check_conflict(self):
+        self._conflict_warning.setVisible(False)
+        self._save_btn.setEnabled(True)
+        time_val = self._time.currentText()
+        if not time_val or not hasattr(self, "_lawyer"):
+            return
+        dur_val = self._duration.currentData()
+        if dur_val is None:
+            dur_val = 60
+        lawyer_id = self._user["user_id"] if self._is_lawyer else (self._lawyer.currentData() if hasattr(self, "_lawyer") else None)
+        if not lawyer_id:
+            return
+        lawyer_conflict = self._repo.find_appointment_conflict({
+            "lawyer_id": lawyer_id,
+            "date": self._date_str,
+            "start_time": time_val,
+            "duration_minutes": dur_val,
+        })
+        if lawyer_conflict:
+            self._conflict_warning.setText(
+                f"The selected time conflicts with '{lawyer_conflict['title']}' "
+                f"({lawyer_conflict['date']} {lawyer_conflict['start_time']})."
+            )
+            self._conflict_warning.setVisible(True)
+            self._save_btn.setEnabled(False)
+            return
+        if not self._is_lawyer:
+            client_conflict = self._repo.find_client_appointment_conflict({
+                "client_id": self._user["user_id"],
+                "date": self._date_str,
+                "start_time": time_val,
+                "duration_minutes": dur_val,
+            })
+            if client_conflict:
+                lawyer = self._repo.get_user(client_conflict["lawyer_id"])
+                lawyer_name = f"{lawyer['first_name']} {lawyer['last_name']}" if lawyer else "another lawyer"
+                self._conflict_warning.setText(
+                    f"You already have an appointment '{client_conflict['title']}' "
+                    f"with {lawyer_name} at this time."
+                )
+                self._conflict_warning.setVisible(True)
+                self._save_btn.setEnabled(False)
 
     def _on_lawyer_changed(self):
         if self._is_lawyer or not hasattr(self, "_lawyer"):
@@ -2713,12 +2873,21 @@ class CalendarPage(QWidget):
 
     def _sync_calendar_dots(self):
         dates = set()
+        finished = set()
+        today_str = datetime.now().strftime("%Y-%m-%d")
         appts = (self._repo.get_appointments_for_lawyer(self._user["user_id"])
                  if self._is_lawyer
                  else self._repo.get_appointments_for_client(self._user["user_id"]))
         for a in appts:
             dates.add(a["date"])
+        by_date = {}
+        for a in appts:
+            by_date.setdefault(a["date"], []).append(a)
+        for date_str, day_appts in by_date.items():
+            if date_str < today_str and all(a["status"] == "Completed" for a in day_appts):
+                finished.add(date_str)
         self._calendar.set_appointment_dates(dates)
+        self._calendar.set_finished_dates(finished)
 
     def _on_date_selected(self, date_str):
         self._selected_date = date_str
@@ -3069,6 +3238,7 @@ class CalendarPage(QWidget):
         if answer != QMessageBox.Yes:
             return
         self._update_appointment_status(appt, "Cancelled", actions)
+        self._show_status_message("Your appointment has been canceled. The lawyer has been notified.", success=True)
 
     def _no_show(self, appt, actions=None):
         answer = QMessageBox.question(
@@ -3328,6 +3498,7 @@ class PaymentDialog(QDialog):
         pay_row = QHBoxLayout()
         pay_row.addWidget(QLabel("Amount to Pay ($):"))
         self._pay_amount = QLineEdit()
+        self._pay_amount.setPlaceholderText("Enter amount to pay")
         self._pay_amount.setStyleSheet(f"padding: 6px 8px; border: 1px solid {BORDER}; border-radius: 4px; font-size: 13px;")
         pay_row.addWidget(self._pay_amount)
         layout.addLayout(pay_row)
@@ -3852,6 +4023,13 @@ class MainWindow(QWidget):
         self.setMinimumSize(860, 560)
         self._setup_ui()
         self._center_on_screen()
+        self._start_reminder_timer()
+
+    def _start_reminder_timer(self):
+        self._repo.send_appointment_reminders()
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.timeout.connect(lambda: self._repo.send_appointment_reminders())
+        self._reminder_timer.start(3600000)
 
     def _setup_ui(self):
         root = QHBoxLayout(self)
@@ -3914,6 +4092,7 @@ class MainWindow(QWidget):
         if hasattr(page_widget, "refresh"):
             page_widget.refresh()
         self._header.refresh_badge()
+        self._sidebar.select_page_by_page_number(page)
 
     def _on_appointment_clicked(self, date_str):
         cal_page = self._pages.widget(PAGE_CALENDAR)
@@ -3921,6 +4100,7 @@ class MainWindow(QWidget):
             self._pages.setCurrentIndex(PAGE_CALENDAR)
             cal_page.navigate_to_date(date_str)
             self._header.refresh_badge()
+            self._sidebar.select_page_by_page_number(PAGE_CALENDAR)
 
     def _on_case_link_from_message(self, case_id):
         self._pages.setCurrentIndex(PAGE_CASES)
@@ -3928,6 +4108,7 @@ class MainWindow(QWidget):
         if cases_page and hasattr(cases_page, "navigate_to_case"):
             cases_page.navigate_to_case(case_id)
         self._header.refresh_badge()
+        self._sidebar.select_page_by_page_number(PAGE_CASES)
 
     def _handle_reset(self):
         self._repo.reset_to_defaults()
@@ -4012,6 +4193,30 @@ class OTPDialog(QDialog):
         self.accept()
 
 
+class SplashScreen(QFrame):
+    def __init__(self):
+        super().__init__(None)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Tool)
+        self.setStyleSheet(f"background: {WHITE}; border: 1px solid {BORDER};")
+        self.setFixedSize(400, 280)
+        self._center_on_screen()
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        self._label = QLabel("Loading your workspace...")
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setStyleSheet(f"color: {NAVY}; font-size: 18px; font-weight: bold; border: none;")
+        layout.addWidget(self._label)
+
+    def _center_on_screen(self):
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.move(screen.center() - self.rect().center())
+
+    def show_message(self, text):
+        self._label.setText(text)
+        self.show()
+        QApplication.processEvents()
+
+
 class EngazApp:
     def __init__(self):
         self._app = QApplication(sys.argv)
@@ -4084,8 +4289,11 @@ class EngazApp:
         if otp.exec() != QDialog.Accepted:
             self._show_login()
             return
+        splash = SplashScreen()
+        splash.show_message("Loading your workspace...")
         self._main = MainWindow(self._repo, user)
         self._main.logout_requested.connect(self._show_login)
+        splash.close()
         self._main.show()
 
 

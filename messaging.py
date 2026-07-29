@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QScrollArea, QFrame, QDialog, QDialogButtonBox,
     QSizePolicy, QSplitter,
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QEvent
 
 from engaz_constants import (
     NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
@@ -224,6 +224,7 @@ class MessageThreadWidget(QWidget):
         self._input.setFixedHeight(50)
         self._input.setStyleSheet(f"padding: 6px; border: 1px solid {BORDER}; border-radius: 6px;"
                                   f" font-size: 13px; color: {TEXT_DARK}; background: {WHITE};")
+        self._input.installEventFilter(self)
         input_row.addWidget(self._input, stretch=1)
 
         send_btn = QPushButton("Send")
@@ -326,6 +327,13 @@ class MessageThreadWidget(QWidget):
 
     def _clear_messages(self):
         clear_layout(self._msg_layout)
+
+    def eventFilter(self, obj, event):
+        if obj is self._input and event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Return and not (event.modifiers() & Qt.ShiftModifier):
+                self._send()
+                return True
+        return super().eventFilter(obj, event)
 
     def _send(self):
         content = self._input.toPlainText().strip()

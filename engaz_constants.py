@@ -290,28 +290,25 @@ class ArrowComboBox(QComboBox):
         self.setPlaceholderText(placeholder)
         self._hovered = False
         self.setMouseTracking(True)
-        super().setStyleSheet(self._arrow_hiding_rules())
         self._apply_popup_style()
         self.currentIndexChanged.connect(lambda _: self._on_index_changed())
         self.installEventFilter(self)
 
-    def _arrow_hiding_rules(self):
-        return ("QComboBox::drop-down { width: 0px; border: none; background: transparent; }"
-                "QComboBox::down-arrow { image: none; }")
+    def _apply_popup_style(self):
+        self.view().window().setCursor(Qt.PointingHandCursor)
 
     def setStyleSheet(self, stylesheet):
         sheet = stylesheet or ""
-        if "down-arrow" not in sheet:
-            sheet += self._arrow_hiding_rules()
+        sheet += "QComboBox::drop-down { width: 0px; border: none; background: transparent; }"
+        sheet += "QComboBox::down-arrow { image: none; width: 0px; border: none; }"
         super().setStyleSheet(sheet)
-
-    def _apply_popup_style(self):
-        self.view().window().setCursor(Qt.PointingHandCursor)
 
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.width() - 30, 0, 30, self.height(),
+                         self.palette().color(self.backgroundRole()))
         color = self._ARROW_HOVER_COLOR if self._hovered else self._ARROW_COLOR
         painter.setPen(QPen(color, 2))
         painter.setBrush(QBrush(color))
@@ -357,23 +354,20 @@ class ArrowDateEdit(QDateEdit):
         self._hovered = False
         self.setMouseTracking(True)
         self.setCalendarPopup(True)
-        super().setStyleSheet(self._arrow_hiding_rules())
         self.installEventFilter(self)
-
-    def _arrow_hiding_rules(self):
-        return ("QAbstractSpinBox::drop-down { border: none; background: transparent; }"
-                "QAbstractSpinBox::down-arrow { image: none; width: 0px; }")
 
     def setStyleSheet(self, stylesheet):
         sheet = stylesheet or ""
-        if "down-arrow" not in sheet:
-            sheet += self._arrow_hiding_rules()
+        sheet += "QAbstractSpinBox::drop-down { border: none; background: transparent; }"
+        sheet += "QAbstractSpinBox::down-arrow { image: none; width: 0px; }"
         super().setStyleSheet(sheet)
 
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.width() - 30, 0, 30, self.height(),
+                         self.palette().color(self.backgroundRole()))
         color = self._ARROW_HOVER_COLOR if self._hovered else self._ARROW_COLOR
         painter.setPen(QPen(color, 2))
         painter.setBrush(QBrush(color))

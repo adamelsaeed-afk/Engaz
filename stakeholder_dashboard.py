@@ -34,7 +34,7 @@ from reportlab.platypus import (
 from reportlab.lib.styles import getSampleStyleSheet
 
 from engaz_constants import (
-    NAVY, STEEL, WHITE, CARD_BG, TEXT_DARK, TEXT_GRAY,
+    NAVY, STEEL, WHITE, LIGHT_GRAY, CARD_BG, TEXT_DARK, TEXT_GRAY,
     GREEN, AMBER, RED, BORDER, clear_layout,
 )
 
@@ -48,7 +48,7 @@ ALL_METRIC_IDS = [
 
 METRIC_LABELS = {
     "closing_rate": "Closing Rate",
-    "revenue": "Revenue Overview",
+    "revenue": "Total Money Made",
     "cases_by_status": "Cases by Status",
     "cases_by_department": "Cases by Department",
     "top_lawyers_closing": "Top Lawyers (Closing Rate)",
@@ -224,12 +224,14 @@ class StakeholderDashboardPage(QWidget):
 
         bl.addStretch()
 
-        gear_btn = QPushButton("\u2699")
-        gear_btn.setFixedSize(32, 32)
-        gear_btn.setStyleSheet(f"QPushButton {{ border: none; font-size: 18px; color: {TEXT_GRAY}; background: transparent; }}"
-                               f"QPushButton:hover {{ color: {NAVY}; }}")
-        gear_btn.clicked.connect(self._toggle_settings)
-        bl.addWidget(gear_btn)
+        customize_btn = QPushButton("Customize Dashboards")
+        customize_btn.setStyleSheet(
+            f"QPushButton {{ background: {LIGHT_GRAY}; color: {NAVY}; border: 1px solid {BORDER}; "
+            f"border-radius: 6px; padding: 8px 16px; font-size: 13px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {BORDER}; }}"
+        )
+        customize_btn.clicked.connect(self._toggle_settings)
+        bl.addWidget(customize_btn)
 
         pdf_btn = QPushButton("Export PDF")
         pdf_btn.setStyleSheet(BTN_PRIMARY_HOVER)
@@ -429,14 +431,15 @@ class StakeholderDashboardPage(QWidget):
 
     def _render_revenue(self, data):
         invoices = data["invoices"]
-        paid = sum(inv["amount"] for inv in invoices if inv.get("status") == "Paid")
+        collected = sum(inv.get("amount_paid", 0.0) for inv in invoices
+                        if inv.get("status") in ("Paid", "Partially Paid"))
         by_month = defaultdict(float)
         for inv in invoices:
-            if inv.get("status") != "Paid":
+            if inv.get("status") not in ("Paid", "Partially Paid"):
                 continue
             d = _parse_date(inv.get("created_at", ""))
             if d:
-                by_month[d.strftime("%Y-%m")] += inv["amount"]
+                by_month[d.strftime("%Y-%m")] += inv.get("amount_paid", 0.0)
         fig, ax = _make_figure()
         if by_month:
             months = sorted(by_month.keys())
@@ -450,7 +453,7 @@ class StakeholderDashboardPage(QWidget):
             ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.0f}"))
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
-        ax.set_title(f"Revenue Overview — ${paid:,.0f} total paid", fontsize=12, fontweight="bold", color=TEXT_DARK, pad=8)
+        ax.set_title(f"Total Money Made — ${collected:,.0f}", fontsize=12, fontweight="bold", color=TEXT_DARK, pad=8)
         ax.tick_params(colors=TEXT_GRAY, labelsize=8)
         fig.tight_layout()
         return fig
@@ -530,8 +533,9 @@ class StakeholderDashboardPage(QWidget):
         lawyers = data["lawyers"]
         lawyer_rev = {}
         for l in lawyers:
-            rev = sum(inv["amount"] for inv in invoices
-                     if inv.get("lawyer_id") == l["user_id"] and inv.get("status") == "Paid")
+            rev = sum(inv.get("amount_paid", 0.0) for inv in invoices
+                     if inv.get("lawyer_id") == l["user_id"]
+                     and inv.get("status") in ("Paid", "Partially Paid"))
             if rev > 0:
                 lawyer_rev[l["user_id"]] = {
                     "name": f"{l['first_name']} {l['last_name']}",
@@ -709,7 +713,8 @@ class StakeholderDashboardPage(QWidget):
         invoices = data["invoices"]
         closed = sum(1 for c in cases if c.get("status") == "Closed")
         rate = f"{(closed / len(cases) * 100):.1f}%" if cases else "0%"
-        paid = sum(inv["amount"] for inv in invoices if inv.get("status") == "Paid")
+        paid = sum(inv.get("amount_paid", 0.0) for inv in invoices
+                   if inv.get("status") in ("Paid", "Partially Paid"))
 
         doc = SimpleDocTemplate(path, pagesize=A4,
                                 leftMargin=36, rightMargin=36,
@@ -725,7 +730,7 @@ class StakeholderDashboardPage(QWidget):
         stat_data = [
             ["Metric", "Value"],
             ["Closing Rate", rate],
-            ["Total Revenue (Paid)", f"${paid:,.0f}"],
+            ["Total Money Made", f"${paid:,.0f}"],
             ["Total Cases", str(len(cases))],
             ["Total Appointments", str(len(data["appointments"]))],
         ]

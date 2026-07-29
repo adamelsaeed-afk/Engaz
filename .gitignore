@@ -5,7 +5,8 @@ __pycache__/
 # --- Local Agent / Tool Directories ---
 .agents/
 .claude/
-
+tests/
+case_files/
 # --- Environment & Secret Files (if you ever add any) ---
 .env
 *.env

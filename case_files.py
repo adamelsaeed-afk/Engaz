@@ -1,4 +1,12 @@
 import os
+import shutil
+
+CASE_FILES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "case_files")
+
+
+def _ensure_case_files_dir():
+    if not os.path.exists(CASE_FILES_DIR):
+        os.makedirs(CASE_FILES_DIR)
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -32,7 +40,7 @@ class AddFileDialog(QDialog):
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(12)
 
-        lbl = QLabel("Select a file to add (path reference only, file is not copied):")
+        lbl = QLabel("Select a file to add to the case:")
         lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_DARK}; border: none;")
         lbl.setWordWrap(True)
         layout.addWidget(lbl)
@@ -215,11 +223,22 @@ class CaseFileListWidget(QWidget):
         dlg = AddFileDialog(parent=self)
         if dlg.exec() != QDialog.Accepted:
             return
+        _ensure_case_files_dir()
+        file_path = dlg.file_path()
+        file_name = dlg.file_name()
+        file_id = self._repo._next_id("case_files", "file")
+        ext = os.path.splitext(file_name)[1]
+        safe_name = f"{file_id}{ext}"
+        try:
+            shutil.copy2(file_path, os.path.join(CASE_FILES_DIR, safe_name))
+        except OSError:
+            QMessageBox.warning(self, "Error", "Could not copy the file.")
+            return
         self._repo.add_case_file({
             "case_id": self._case_id,
             "added_by": self._viewer_user_id,
             "file_name": dlg.file_name(),
-            "file_path": dlg.file_path(),
+            "file_path": safe_name,
             "shared_with_client": False,
         })
         self._load()
@@ -253,11 +272,12 @@ class CaseFileListWidget(QWidget):
         self.files_changed.emit()
 
     def _open_file(self, file_path):
-        if os.path.exists(file_path):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+        resolved = os.path.join(CASE_FILES_DIR, file_path)
+        if os.path.exists(resolved):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(resolved))
         else:
             QMessageBox.warning(self, "File Not Found",
-                                f"The file could not be found at:\n{file_path}")
+                                f"The file could not be found at:\n{resolved}")
 
 
 class TaskFormDialog(QDialog):
