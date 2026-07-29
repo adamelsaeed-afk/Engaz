@@ -5,6 +5,9 @@ __pycache__/
 # --- Local Agent / Tool Directories ---
 .agents/
 .claude/
+test/
+case_files/
+law_books/
 
 # --- Environment & Secret Files (if you ever add any) ---
 .env
@@ -35,6 +38,11 @@ audit_gemini.md
 engaz_implementation_plan.md
 engaz_features_14_22_instructions.md
 engaz_implementation_instructions.md
+engaz_ui_ux_enhancements_plan.md
+engaz_phased_implementation_instructions.md
+engaz_handoff_V2.md
+
+
 # json  files
 skills-lock.json
 # --- Ignore Docker files ---
