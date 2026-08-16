@@ -239,7 +239,7 @@ class CaseFileListWidget(QWidget):
             "added_by": self._viewer_user_id,
             "file_name": dlg.file_name(),
             "file_path": safe_name,
-            "shared_with_client": False,
+            "shared_with_client": not self._is_lawyer,
         })
         self._load()
         self.files_changed.emit()
@@ -391,12 +391,13 @@ class CaseTasksWidget(QWidget):
         title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_DARK}; border: none;")
         header.addWidget(title)
         header.addStretch()
-        add_btn = QPushButton("+ Add Task")
-        add_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
-                              f" border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: bold; }}"
-                              f"QPushButton:hover {{ background: {STEEL}; }}")
-        add_btn.clicked.connect(self._add_task)
-        header.addWidget(add_btn)
+        if self._is_lawyer:
+            add_btn = QPushButton("+ Add Task")
+            add_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
+                                  f" border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: bold; }}"
+                                  f"QPushButton:hover {{ background: {STEEL}; }}")
+            add_btn.clicked.connect(self._add_task)
+            header.addWidget(add_btn)
         layout.addLayout(header)
 
         self._list = QVBoxLayout()
@@ -586,12 +587,13 @@ class CaseTimelineWidget(QWidget):
         title.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {TEXT_DARK}; border: none;")
         header.addWidget(title)
         header.addStretch()
-        add_btn = QPushButton("+ Add Event")
-        add_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
-                              f" border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: bold; }}"
-                              f"QPushButton:hover {{ background: {STEEL}; }}")
-        add_btn.clicked.connect(self._add_timeline)
-        header.addWidget(add_btn)
+        if self._is_lawyer:
+            add_btn = QPushButton("+ Add Event")
+            add_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
+                                  f" border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: bold; }}"
+                                  f"QPushButton:hover {{ background: {STEEL}; }}")
+            add_btn.clicked.connect(self._add_timeline)
+            header.addWidget(add_btn)
         layout.addLayout(header)
 
         self._list = QVBoxLayout()
@@ -618,7 +620,10 @@ class CaseTimelineWidget(QWidget):
 
         cb = QCheckBox()
         cb.setChecked(item["is_completed"])
-        cb.toggled.connect(lambda checked, t=item: self._toggle(t, checked))
+        if self._is_lawyer:
+            cb.toggled.connect(lambda checked, t=item: self._toggle(t, checked))
+        else:
+            cb.setEnabled(False)
         rl.addWidget(cb)
 
         info = QVBoxLayout()
@@ -647,13 +652,14 @@ class CaseTimelineWidget(QWidget):
             info.addWidget(dl)
         rl.addLayout(info, stretch=1)
 
-        del_btn = QPushButton("\u2715")
-        del_btn.setFixedSize(24, 24)
-        del_btn.setCursor(Qt.PointingHandCursor)
-        del_btn.setStyleSheet("QPushButton { background: transparent; border: none; color: #DC2626; font-size: 14px; }"
-                              "QPushButton:hover { background: #FEE2E2; border-radius: 4px; }")
-        del_btn.clicked.connect(lambda: self._delete(item["timeline_id"]))
-        rl.addWidget(del_btn)
+        if self._is_lawyer:
+            del_btn = QPushButton("\u2715")
+            del_btn.setFixedSize(24, 24)
+            del_btn.setCursor(Qt.PointingHandCursor)
+            del_btn.setStyleSheet("QPushButton { background: transparent; border: none; color: #DC2626; font-size: 14px; }"
+                                  "QPushButton:hover { background: #FEE2E2; border-radius: 4px; }")
+            del_btn.clicked.connect(lambda: self._delete(item["timeline_id"]))
+            rl.addWidget(del_btn)
 
         return row
 
@@ -759,38 +765,51 @@ class CaseDetailView(QDialog):
             eb_row.addStretch()
             layout.addLayout(eb_row)
 
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet(f"color: {BORDER}; border: none; margin: 4px 0;")
-        layout.addWidget(separator)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border: none; background: {WHITE}; }}"
+                             f"QScrollBar:vertical {{ width: 8px; background: transparent; }}"
+                             f"QScrollBar::handle:vertical {{ background: #D1D5DB; border-radius: 4px; }}"
+                             f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}")
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet(f"background: {WHITE}; border: none;")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(12)
 
         self._file_list = CaseFileListWidget(
             self._repo, self._case["case_id"],
             self._viewer_user["user_id"], self._viewer_user["role"],
         )
-        layout.addWidget(self._file_list)
+        scroll_layout.addWidget(self._file_list)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
         sep2.setStyleSheet(f"color: {BORDER}; border: none; margin: 4px 0;")
-        layout.addWidget(sep2)
+        scroll_layout.addWidget(sep2)
 
         self._tasks_widget = CaseTasksWidget(
             self._repo, self._case["case_id"],
             self._viewer_user["user_id"], self._viewer_user["role"],
         )
-        layout.addWidget(self._tasks_widget)
+        is_lawyer = self._viewer_user["role"] == "lawyer"
+        self._tasks_widget.setVisible(is_lawyer)
+        scroll_layout.addWidget(self._tasks_widget)
 
         sep3 = QFrame()
         sep3.setFrameShape(QFrame.HLine)
         sep3.setStyleSheet(f"color: {BORDER}; border: none; margin: 4px 0;")
-        layout.addWidget(sep3)
+        sep3.setVisible(is_lawyer)
+        scroll_layout.addWidget(sep3)
 
         self._timeline_widget = CaseTimelineWidget(
             self._repo, self._case["case_id"],
             self._viewer_user["user_id"], self._viewer_user["role"],
         )
-        layout.addWidget(self._timeline_widget)
+        scroll_layout.addWidget(self._timeline_widget)
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, stretch=1)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()

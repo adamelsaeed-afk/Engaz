@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QFileDialog, QSpinBox, QSizePolicy,
     QGraphicsDropShadowEffect, QMessageBox,
 )
-from PySide6.QtCore import Qt, Signal, QUrl, QTimer
+from PySide6.QtCore import Qt, Signal, QUrl, QTimer, QEvent
 from PySide6.QtGui import QColor, QDesktopServices
 
 from engaz_constants import (
@@ -251,7 +251,7 @@ class BookChatWidget(QWidget):
         self._input = QLineEdit()
         self._input.setPlaceholderText("Type a message...")
         self._input.setStyleSheet(_field_style())
-        self._input.returnPressed.connect(self._send)
+        self._input.installEventFilter(self)
         input_row.addWidget(self._input, stretch=1)
         send_btn = QPushButton("Send")
         send_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
@@ -310,6 +310,13 @@ class BookChatWidget(QWidget):
             "content": content,
         })
         self._refresh()
+
+    def eventFilter(self, obj, event):
+        if obj is self._input and event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Return and not (event.modifiers() & Qt.ShiftModifier):
+                self._send()
+                return True
+        return super().eventFilter(obj, event)
 
 
 class BookCommentsWidget(QWidget):
@@ -532,8 +539,15 @@ class BookListView(QWidget):
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search by title, author, or category...")
         self._search.setStyleSheet(GLOBAL_QSS)
-        self._search.textChanged.connect(self._on_search)
+        self._search.returnPressed.connect(self._on_search)
         filter_row.addWidget(self._search, stretch=1)
+
+        search_btn = QPushButton("Search")
+        search_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
+                                 f" border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: bold; }}"
+                                 f"QPushButton:hover {{ background: {STEEL}; }}")
+        search_btn.clicked.connect(self._on_search)
+        filter_row.addWidget(search_btn)
 
         self._category_filter = ArrowComboBox(placeholder="All")
         self._category_filter.addItems(self.CATEGORIES)
@@ -612,8 +626,16 @@ class BookListView(QWidget):
     def _make_book_card(self, book):
         card = QFrame()
         card.setCursor(Qt.PointingHandCursor)
+        highlight_border = ""
+        query = self._search.text().strip().lower()
+        if query:
+            matches = (query in book.get("title", "").lower()
+                       or query in book.get("author", "").lower()
+                       or query in book.get("category", "").lower())
+            if matches:
+                highlight_border = f"border: 2px solid {AMBER};"
         card.setStyleSheet(f"""
-            QFrame {{ background: {WHITE}; border: 1px solid {BORDER}; border-radius: 8px; }}
+            QFrame {{ background: {WHITE}; border: 1px solid {BORDER}; border-radius: 8px; {highlight_border} }}
             QFrame:hover {{ border-color: {STEEL}; background: {CARD_BG}; }}
         """)
         shadow = QGraphicsDropShadowEffect()

@@ -370,7 +370,8 @@ class ConversationListWidget(QWidget):
         self._repo = repo
         self._user = user
         self._is_lawyer = user["role"] == "lawyer"
-        self._selected_id = None
+        self._selected_partner_id = None
+        self._selected_case_id = None
         self._build()
 
     def _build(self):
@@ -433,7 +434,7 @@ class ConversationListWidget(QWidget):
         frame = QFrame()
         frame.setCursor(Qt.PointingHandCursor)
         frame.setFixedHeight(64)
-        selected = conv["partner_id"] == self._selected_id
+        selected = conv["partner_id"] == self._selected_partner_id and conv.get("case_id", "") == self._selected_case_id
         bg = "#EBF0F5" if selected else WHITE
         frame.setStyleSheet(f"QFrame {{ background: {bg}; border: none;"
                             f" border-bottom: 1px solid {BORDER}; }}"
@@ -489,7 +490,8 @@ class ConversationListWidget(QWidget):
         return frame
 
     def _select(self, partner_id, partner_name, case_id):
-        self._selected_id = partner_id
+        self._selected_partner_id = partner_id
+        self._selected_case_id = case_id
         self.conversation_selected.emit(partner_id, partner_name, case_id)
 
 

@@ -234,7 +234,11 @@ class StakeholderDashboardPage(QWidget):
         bl.addWidget(customize_btn)
 
         pdf_btn = QPushButton("Export PDF")
-        pdf_btn.setStyleSheet(BTN_PRIMARY_HOVER)
+        pdf_btn.setStyleSheet(
+            f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: 1px solid {NAVY}; "
+            f"border-radius: 6px; padding: 8px 16px; font-size: 13px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {STEEL}; border: 1px solid {STEEL}; }}"
+        )
         pdf_btn.clicked.connect(self._export_pdf)
         bl.addWidget(pdf_btn)
 
@@ -375,6 +379,8 @@ class StakeholderDashboardPage(QWidget):
             "overdue_invoices": self._render_overdue_invoices,
         }.get(mid)
         if fn:
+            if mid in self._chart_figures:
+                plt.close(self._chart_figures[mid])
             widget = _MetricWidget(mid, METRIC_LABELS[mid])
             fig = fn(data)
             self._chart_figures[mid] = fig
@@ -419,7 +425,7 @@ class StakeholderDashboardPage(QWidget):
 
     def _render_closing_rate(self, data):
         cases = data["cases"]
-        closed = sum(1 for c in cases if c.get("status") == "Closed")
+        closed = sum(1 for c in cases if c.get("status") in ("Closed", "Won", "Lost"))
         rate = f"{(closed / len(cases) * 100):.1f}%" if cases else "0%"
         fig, ax = _make_figure((4, 1.5))
         ax.axis("off")
@@ -463,9 +469,9 @@ class StakeholderDashboardPage(QWidget):
         counts = defaultdict(int)
         for c in cases:
             counts[c.get("status", "Unknown")] += 1
-        statuses = ["Open", "In Progress", "Closed"]
+        statuses = ["Open", "In Progress", "Closed", "Won", "Lost"]
         vals = [counts.get(s, 0) for s in statuses]
-        colors = [STEEL, AMBER, GREEN]
+        colors = [STEEL, AMBER, GREEN, NAVY, "#8B5CF6"]
         fig, ax = _make_figure()
         bars = ax.bar(statuses, vals, color=colors, edgecolor="none")
         for b, v in zip(bars, vals):
@@ -490,8 +496,9 @@ class StakeholderDashboardPage(QWidget):
             labels = list(counts.keys())
             vals = list(counts.values())
             clrs = [NAVY, STEEL, GREEN, AMBER, "#8B5CF6"]
+            cycled = [clrs[i % len(clrs)] for i in range(len(labels))]
             wedges, texts, autotexts = ax.pie(
-                vals, labels=labels, autopct="%1.1f%%", colors=clrs[:len(labels)],
+                vals, labels=labels, autopct="%1.1f%%", colors=cycled,
                 startangle=140, textprops={"fontsize": 9, "color": TEXT_DARK},
             )
             for at in autotexts:
@@ -508,7 +515,7 @@ class StakeholderDashboardPage(QWidget):
         for l in lawyers:
             lc = [c for c in cases if c.get("lawyer_id") == l["user_id"]]
             if lc:
-                closed = sum(1 for c in lc if c.get("status") == "Closed")
+                closed = sum(1 for c in lc if c.get("status") in ("Closed", "Won", "Lost"))
                 lawyer_stats[l["user_id"]] = {
                     "name": f"{l['first_name']} {l['last_name']}",
                     "rate": closed / len(lc) * 100,
@@ -683,7 +690,7 @@ class StakeholderDashboardPage(QWidget):
     def _render_overdue_invoices(self, data):
         invoices = data.get("invoices", [])
         overdue = [inv for inv in invoices if inv.get("status") == "Overdue"
-                   or (inv.get("status") != "Paid" and inv.get("due_date", "") < datetime.now().strftime("%Y-%m-%d"))]
+                   or (inv.get("status") != "Paid" and inv.get("due_date") and inv["due_date"] < datetime.now().strftime("%Y-%m-%d"))]
         count = len(overdue)
         total = sum(inv["amount"] - inv.get("amount_paid", 0.0) for inv in overdue)
         fig, ax = _make_figure(figsize=(7, 3.2))
@@ -711,7 +718,7 @@ class StakeholderDashboardPage(QWidget):
         data = self._compute_data()
         cases = data["cases"]
         invoices = data["invoices"]
-        closed = sum(1 for c in cases if c.get("status") == "Closed")
+        closed = sum(1 for c in cases if c.get("status") in ("Closed", "Won", "Lost"))
         rate = f"{(closed / len(cases) * 100):.1f}%" if cases else "0%"
         paid = sum(inv.get("amount_paid", 0.0) for inv in invoices
                    if inv.get("status") in ("Paid", "Partially Paid"))

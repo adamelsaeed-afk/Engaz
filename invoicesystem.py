@@ -349,6 +349,7 @@ class DataRepository:
     def update_case(self, case_id, **updates):
         for i, c in enumerate(self._data["cases"]):
             if c["case_id"] == case_id:
+                updates["updated_at"] = datetime.now().isoformat()
                 self._data["cases"][i].update(updates)
                 self._save()
                 return dict(self._data["cases"][i])
@@ -447,6 +448,7 @@ class DataRepository:
     def update_appointment(self, appointment_id, **updates):
         for i, a in enumerate(self._data["appointments"]):
             if a["appointment_id"] == appointment_id:
+                updates["updated_at"] = datetime.now().isoformat()
                 self._data["appointments"][i].update(updates)
                 self._save()
                 return dict(self._data["appointments"][i])
@@ -589,8 +591,11 @@ class DataRepository:
                 return dict(self._data["invoices"][i])
         return None
 
-    def count_unpaid_invoices(self):
-        return sum(1 for inv in self._data["invoices"] if inv["status"] != "Paid")
+    def count_unpaid_invoices(self, lawyer_id=None):
+        invoices = self._data["invoices"]
+        if lawyer_id:
+            invoices = [inv for inv in invoices if inv.get("lawyer_id") == lawyer_id]
+        return sum(1 for inv in invoices if inv["status"] != "Paid")
 
     def total_money_made(self, lawyer_id=None):
         invoices = self._data["invoices"]
@@ -670,17 +675,20 @@ class DataRepository:
             if m["sender_id"] != user_id and m["receiver_id"] != user_id:
                 continue
             other = m["sender_id"] if m["receiver_id"] == user_id else m["receiver_id"]
-            if other not in partners or m["created_at"] > partners[other]["last_at"]:
+            case_id = m.get("case_id", "")
+            key = (other, case_id)
+            if key not in partners or m["created_at"] > partners[key]["last_at"]:
                 unread = sum(
                     1 for x in self._data["messages"]
-                    if x["sender_id"] == other and x["receiver_id"] == user_id and not x["is_read"]
+                    if x["sender_id"] == other and x["receiver_id"] == user_id
+                    and not x["is_read"] and x.get("case_id", "") == case_id
                 )
-                partners[other] = {
+                partners[key] = {
                     "partner_id": other,
                     "last_message": m["content"],
                     "last_at": m["created_at"],
                     "last_sender_id": m["sender_id"],
-                    "case_id": m.get("case_id", ""),
+                    "case_id": case_id,
                     "unread_count": unread,
                 }
         result = list(partners.values())
@@ -1741,7 +1749,7 @@ class DashboardPage(QWidget):
                 f"${self._repo.total_money_made(uid):,.2f}",
                 self._repo.count_active_cases_for_lawyer(uid),
                 self._repo.count_pending_appointments_for_lawyer(uid),
-                self._repo.count_unpaid_invoices(),
+                self._repo.count_unpaid_invoices(uid),
                 self._repo.unread_notification_count(uid),
             ]
         else:
@@ -1787,7 +1795,7 @@ class DashboardPage(QWidget):
         c2 = StatCard("Pending Appointments", self._repo.count_pending_appointments_for_lawyer(uid))
         c2.setCursor(Qt.PointingHandCursor)
         c2.clicked.connect(lambda: self.navigate_to.emit(PAGE_CALENDAR))
-        c3 = StatCard("Pending Invoices", self._repo.count_unpaid_invoices(), AMBER)
+        c3 = StatCard("Pending Invoices", self._repo.count_unpaid_invoices(uid), AMBER)
         c3.setCursor(Qt.PointingHandCursor)
         c3.clicked.connect(lambda: self.navigate_to.emit(PAGE_INVOICES))
         c4 = StatCard("Unread Notifications", self._repo.unread_notification_count(uid), RED)
@@ -2135,7 +2143,7 @@ class CaseForm(QDialog):
             if self._status_input.currentText() == "Closed":
                 answer = QMessageBox.question(
                     self, "Confirm Close",
-                    "Are you sure you want to close this case? This cannot be undone.",
+                    "Are you sure you want to close this case?",
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
                 )
                 if answer != QMessageBox.Yes:
@@ -2869,7 +2877,34 @@ class CalendarPage(QWidget):
 
     def _refresh_all(self):
         self._sync_calendar_dots()
+        if self._is_lawyer:
+            self._check_unrescheduled_declined()
         self._on_date_selected(self._selected_date)
+
+    def _check_unrescheduled_declined(self):
+        two_days_ago = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+        appts = self._repo.get_appointments_for_lawyer(self._user["user_id"])
+        for a in appts:
+            if a.get("status") == "Declined" and not a.get("rescheduled"):
+                if a.get("declined_at", a.get("updated_at", "")):
+                    declined_date = a.get("declined_at", a.get("updated_at", ""))[:10]
+                else:
+                    declined_date = a.get("date", "")
+                if declined_date and declined_date <= two_days_ago:
+                    already_reminded = any(
+                        n.get("notification_type") == "reschedule_reminder"
+                        and n.get("reference_id") == a["appointment_id"]
+                        for n in self._repo._data["notifications"]
+                    )
+                    if not already_reminded:
+                        self._repo.create_notification({
+                            "user_id": self._user["user_id"],
+                            "title": "Reschedule Reminder",
+                            "message": f"Reminder: Appointment '{a['title']}' "
+                                       f"(declined on {declined_date}) needs to be rescheduled.",
+                            "notification_type": "reschedule_reminder",
+                            "reference_id": a["appointment_id"],
+                        })
 
     def _sync_calendar_dots(self):
         dates = set()
@@ -3108,6 +3143,28 @@ class CalendarPage(QWidget):
             cancel_btn.clicked.connect(lambda chk, a=appt, ac=actions: self._cancel(a, ac))
             actions_layout.addWidget(cancel_btn)
 
+        if self._is_lawyer and appt["status"] == "Declined" and not appt.get("rescheduled"):
+            reschedule_btn = QPushButton("Reschedule")
+            reschedule_btn.setFixedHeight(22)
+            reschedule_btn.setStyleSheet("""
+            QPushButton {
+                background: %s;
+                color: %s;
+                border: 0px;
+                outline: 0px;
+                border-radius: 10px;
+                padding: 2px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: %s;
+                color: %s;
+            }
+            """ % (NAVY, WHITE, STEEL, WHITE))
+            reschedule_btn.clicked.connect(lambda chk, a=appt, ac=actions: self._reschedule(a, ac))
+            actions_layout.addWidget(reschedule_btn)
+
         hl.addWidget(actions)
         return frame
 
@@ -3169,9 +3226,12 @@ class CalendarPage(QWidget):
 
     def _update_appointment_status(self, appt, new_status, actions=None):
         notif_title, verb, color = self._STATUS_INFO[new_status]
-        self._repo.update_appointment(appt["appointment_id"], status=new_status)
+        updates = {"status": new_status}
+        if new_status == "Declined":
+            updates["declined_at"] = datetime.now().isoformat()
+        self._repo.update_appointment(appt["appointment_id"], **updates)
         self._repo.create_notification({
-            "user_id": appt["client_id"],
+            "user_id": appt["client_id"] if self._is_lawyer else appt["lawyer_id"],
             "title": notif_title,
             "message": f"Your appointment '{appt['title']}' on {appt['date']} has been {verb}.",
             "notification_type": notif_title.lower().replace(" ", "_"),
@@ -3197,6 +3257,27 @@ class CalendarPage(QWidget):
                 item = action_layout.takeAt(i)
                 if item.widget():
                     item.widget().deleteLater()
+            if self._is_lawyer and new_status == "Declined" and not appt.get("rescheduled"):
+                reschedule_btn = QPushButton("Reschedule")
+                reschedule_btn.setFixedHeight(22)
+                reschedule_btn.setStyleSheet("""
+                QPushButton {
+                    background: %s;
+                    color: %s;
+                    border: 0px;
+                    outline: 0px;
+                    border-radius: 10px;
+                    padding: 2px 12px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background: %s;
+                    color: %s;
+                }
+                """ % (NAVY, WHITE, STEEL, WHITE))
+                reschedule_btn.clicked.connect(lambda chk, a=appt, ac=actions: self._reschedule(a, ac))
+                action_layout.addWidget(reschedule_btn)
             self._show_status_message(f"Appointment {verb} and the client has been notified.", success=True)
             self._sync_calendar_dots()
         else:
@@ -3225,6 +3306,96 @@ class CalendarPage(QWidget):
         if answer != QMessageBox.Yes:
             return
         self._update_appointment_status(appt, "Declined", actions)
+
+    def _reschedule(self, appt, actions=None):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Reschedule Appointment")
+        dlg.setMinimumWidth(380)
+        dlg.setStyleSheet(f"background: {WHITE};")
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+
+        layout.addWidget(QLabel("Propose a new date and time for this appointment:"))
+
+        date_pick = QDateEdit()
+        date_pick.setCalendarPopup(True)
+        date_pick.setDate(QDate.currentDate())
+        date_pick.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        layout.addWidget(date_pick)
+
+        layout.addWidget(QLabel("Time:"))
+        time_combo = ArrowComboBox(placeholder="Select time...")
+        for h in range(8, 19):
+            for m in (0, 30):
+                time_combo.addItem(f"{h:02d}:{m:02d}")
+        time_combo.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        layout.addWidget(time_combo)
+
+        duration_combo = ArrowComboBox(placeholder="Duration...")
+        for mins in (30, 45, 60, 90, 120):
+            duration_combo.addItem(f"{mins} min", mins)
+        duration_combo.setCurrentIndex(2)
+        duration_combo.setStyleSheet(f"padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 4px;")
+        layout.addWidget(duration_combo)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet(BTN_SECONDARY_HOVER)
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_layout.addWidget(cancel_btn)
+        ok_btn = QPushButton("Reschedule")
+        ok_btn.setStyleSheet(BTN_PRIMARY_HOVER)
+        ok_btn.clicked.connect(dlg.accept)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        new_date = date_pick.date().toString("yyyy-MM-dd")
+        new_time = time_combo.currentText()
+        new_duration = duration_combo.currentData()
+
+        conflict = self._repo.find_appointment_conflict({
+            "lawyer_id": appt["lawyer_id"], "date": new_date,
+            "start_time": new_time, "duration_minutes": new_duration,
+        })
+        if conflict:
+            QMessageBox.warning(self, "Schedule Conflict",
+                f"The selected time conflicts with '{conflict['title']}' "
+                f"({conflict['date']} {conflict['start_time']}).")
+            return
+
+        client = self._repo.get_user(appt["client_id"])
+        new_data = {
+            "client_id": appt["client_id"],
+            "lawyer_id": appt["lawyer_id"],
+            "title": f"Rescheduled: {appt['title']}",
+            "date": new_date,
+            "start_time": new_time,
+            "duration_minutes": new_duration,
+            "meeting_type": appt.get("meeting_type", "consultation"),
+            "notes": f"Rescheduled from {appt['date']} {appt['start_time']}.\n{appt.get('notes', '')}",
+            "status": "Requested",
+            "original_appointment_id": appt["appointment_id"],
+            "case_id": appt.get("case_id", ""),
+        }
+        new_appt = self._repo.create_appointment(new_data)
+
+        self._repo.update_appointment(appt["appointment_id"], rescheduled=True)
+
+        self._repo.create_notification({
+            "user_id": appt["client_id"],
+            "title": "Appointment Rescheduled",
+            "message": f"{self._user['first_name']} {self._user['last_name']} "
+                       f"proposed a new time for '{appt['title']}': {new_date} at {new_time}.",
+            "notification_type": "appointment_rescheduled",
+            "reference_id": new_appt["appointment_id"],
+        })
+        self._show_status_message("Reschedule request sent to the client.", success=True)
+        self._refresh_all()
 
     def _complete(self, appt, actions=None):
         self._update_appointment_status(appt, "Completed", actions)
@@ -3413,12 +3584,22 @@ class InvoiceFormDialog(QDialog):
         rate_cap = self._repo.get_rate_cap()
         case_id = self._case.currentData()
         hours_entries = self._repo.get_billable_hours_for_case(case_id)
+        has_warning = False
         for h in hours_entries:
             if h["hourly_rate"] > rate_cap:
                 self._rate_cap_warn.show_message(
                     f"Warning: Rate cap is ${rate_cap:.2f}/hr. "
                     f"Entry '{h['description']}' has rate ${h['hourly_rate']:.2f}/hr."
                 )
+                has_warning = True
+        if has_warning:
+            answer = QMessageBox.warning(
+                self, "Rate Cap Warning",
+                "Some billable rates exceed the rate cap. Do you still want to continue?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
         self.accept()
 
     def invoice_data(self):
@@ -3873,12 +4054,11 @@ class InvoicesPage(QWidget):
         data["lawyer_id"] = self._user["user_id"]
         inv = self._repo.create_invoice(data)
         client = self._repo.get_user(data["client_id"])
-        cn = _client_display_name(client) if client else "a client"
         self._repo.create_notification({
             "user_id": data["client_id"],
             "title": "Invoice Created",
             "message": f"New invoice {inv['invoice_number']} for ${inv['amount']:,.2f} "
-                       f"created by {cn}.",
+                       f"created by {self._user['first_name']} {self._user['last_name']}.",
             "notification_type": "invoice_created",
             "reference_id": inv["invoice_id"],
         })
@@ -3892,12 +4072,16 @@ class InvoicesPage(QWidget):
             if not selected:
                 self._load_table()
                 return
-            pay_per_inv = pay_amount / len(selected)
+            remaining = pay_amount
             for inv_id in selected:
                 inv = self._repo.get_invoice(inv_id)
                 if not inv:
                     continue
-                new_paid = inv.get("amount_paid", 0.0) + pay_per_inv
+                balance = inv["amount"] - inv.get("amount_paid", 0.0)
+                if balance <= 0:
+                    continue
+                apply_amount = min(remaining, balance)
+                new_paid = inv.get("amount_paid", 0.0) + apply_amount
                 if new_paid >= inv["amount"]:
                     self._repo.update_invoice(inv_id, amount_paid=inv["amount"], status="Paid")
                 else:
@@ -3905,10 +4089,11 @@ class InvoicesPage(QWidget):
                 self._repo.create_notification({
                     "user_id": inv["lawyer_id"],
                     "title": "Invoice Payment Received",
-                    "message": f"Payment of ${pay_per_inv:,.2f} received for invoice {inv['invoice_number']}.",
+                    "message": f"Payment of ${apply_amount:,.2f} received for invoice {inv['invoice_number']}.",
                     "notification_type": "invoice_paid",
                     "reference_id": inv_id,
                 })
+                remaining -= apply_amount
             QMessageBox.information(self, "Payment Successful",
                                     "Your payment has been processed successfully.")
         self._load_table()

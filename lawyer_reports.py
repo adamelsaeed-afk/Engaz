@@ -290,13 +290,13 @@ class LawyerReportsPage(QWidget):
         bar_layout.addWidget(QLabel("Period:"))
         bar_layout.addWidget(self._range_combo)
 
-        self._from_date = LeftAlignedDateEdit()
+        self._from_date = ArrowDateEdit()
         self._from_date.setDate(QDate.currentDate().addMonths(-1))
         self._from_date.setStyleSheet(f"padding: 3px 6px; border: 1px solid {BORDER}; border-radius: 4px; font-size: 12px;")
         self._from_date.setVisible(False)
         bar_layout.addWidget(self._from_date)
 
-        self._to_date = LeftAlignedDateEdit()
+        self._to_date = ArrowDateEdit()
         self._to_date.setDate(QDate.currentDate())
         self._to_date.setStyleSheet(f"padding: 3px 6px; border: 1px solid {BORDER}; border-radius: 4px; font-size: 12px;")
         self._to_date.setVisible(False)
@@ -390,7 +390,10 @@ class LawyerReportsPage(QWidget):
 
     def _clear_content(self):
         for widget in self._all_widgets:
-            widget.deleteLater()
+            try:
+                widget.deleteLater()
+            except RuntimeError:
+                pass
         self._all_widgets.clear()
         self._panels.clear()
         for fig in self._chart_figures.values():
@@ -411,7 +414,7 @@ class LawyerReportsPage(QWidget):
         row.addWidget(c1)
         self._all_widgets.append(c1)
 
-        closed = [c for c in cases if c.get("status") == "Closed"]
+        closed = [c for c in cases if c.get("status") in ("Closed", "Won", "Lost")]
         rate = f"{(len(closed) / len(cases) * 100):.1f}%" if cases else "—"
         c2 = StatCardWidget("Closing Rate", rate, GREEN)
         c2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -421,12 +424,12 @@ class LawyerReportsPage(QWidget):
         self._all_widgets.append(c2)
 
         closed_dates = [
-            _parse_date(c.get("created_at", ""))
-            for c in cases if c.get("status") == "Closed"
+            (_parse_date(c.get("updated_at", c.get("created_at", ""))),
+             _parse_date(c.get("created_at", "")))
+            for c in cases if c.get("status") in ("Closed", "Won", "Lost")
         ]
         if closed_dates:
-            now = datetime.now()
-            avg_days = sum((now - d).days for d in closed_dates if d) / len(closed_dates)
+            avg_days = sum((end - start).days for end, start in closed_dates if end and start) / len(closed_dates)
             avg_str = f"{avg_days:.0f} days"
         else:
             avg_str = "—"
@@ -447,6 +450,8 @@ class LawyerReportsPage(QWidget):
         def refresh_chart(chart_type=None):
             if chart_type is None:
                 chart_type = panel.chart_type()
+            if metric_key in self._chart_figures:
+                plt.close(self._chart_figures[metric_key])
             fig = render_fn(chart_type, data1, data2, data3)
             self._chart_figures[metric_key] = fig
             canvas = _chart_widget(fig)
@@ -516,12 +521,38 @@ class LawyerReportsPage(QWidget):
 
             ch_export = QPushButton("Export")
             ch_export.setStyleSheet(BTN_PRIMARY_HOVER)
-            ch_export.clicked.connect(lambda: export_this_chart())
+            ch_export.clicked.connect(lambda: export_expanded_chart(big_fig))
             ch_header.addWidget(ch_export)
             dlg_layout.addLayout(ch_header)
 
             big_fig = render_fn(panel.chart_type(), data1, data2, data3)
             big_canvas = FigureCanvasQTAgg(big_fig)
+
+            def export_expanded_chart(fig_to_save):
+                path, _ = QFileDialog.getSaveFileName(
+                    dlg, f"Export {title}", f"{metric_key}.png",
+                    "PNG (*.png);;PDF (*.pdf)"
+                )
+                if not path:
+                    return
+                if path.lower().endswith(".pdf"):
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        png_path = os.path.join(tmpdir, "chart.png")
+                        fig_to_save.savefig(png_path, dpi=150, bbox_inches="tight",
+                                           facecolor=WHITE, edgecolor="none")
+                        doc = SimpleDocTemplate(path, pagesize=landscape(A4),
+                                                leftMargin=36, rightMargin=36,
+                                                topMargin=36, bottomMargin=36)
+                        styles = getSampleStyleSheet()
+                        elements = [
+                            Paragraph(title, styles["Title"]),
+                            Spacer(1, 12),
+                            Image(png_path, width=9 * inch, height=4 * inch),
+                        ]
+                        doc.build(elements)
+                else:
+                    fig_to_save.savefig(path, dpi=150, bbox_inches="tight",
+                                       facecolor=WHITE, edgecolor="none")
             big_canvas.setFocusPolicy(Qt.NoFocus)
             big_canvas.setStyleSheet(f"border: 1px solid {BORDER}; border-radius: 6px; background: {WHITE};")
             dlg_layout.addWidget(big_canvas, stretch=1)
@@ -531,11 +562,14 @@ class LawyerReportsPage(QWidget):
                 for i in reversed(range(dlg_layout.count())):
                     item = dlg_layout.itemAt(i)
                     if item.widget() and isinstance(item.widget(), FigureCanvasQTAgg):
+                        plt.close(item.widget().figure)
                         item.widget().deleteLater()
                 new_canvas = FigureCanvasQTAgg(new_fig)
                 new_canvas.setFocusPolicy(Qt.NoFocus)
                 new_canvas.setStyleSheet(f"border: 1px solid {BORDER}; border-radius: 6px; background: {WHITE};")
                 dlg_layout.addWidget(new_canvas, stretch=1)
+                ch_export.clicked.disconnect()
+                ch_export.clicked.connect(lambda: export_expanded_chart(new_fig))
 
             ch_combo.currentTextChanged.connect(on_type_change)
             dlg.exec()
@@ -602,7 +636,7 @@ class LawyerReportsPage(QWidget):
         if not path:
             return
         uid = self._user["user_id"]
-        all_cases = self._repo.get_cases_for_lawyer(uid)
+        all_cases = self._filtered_cases if self._filtered_cases is not None else self._repo.get_cases_for_lawyer(uid)
         doc = SimpleDocTemplate(path, pagesize=landscape(A4),
                                 leftMargin=24, rightMargin=24,
                                 topMargin=24, bottomMargin=24)
@@ -658,9 +692,9 @@ def _render_cases_by_status(chart_type, cases, _d2, _d3):
     counts = defaultdict(int)
     for c in cases:
         counts[c.get("status", "Unknown")] += 1
-    statuses = ["Open", "In Progress", "Closed"]
+    statuses = ["Open", "In Progress", "Closed", "Won", "Lost"]
     values = [counts.get(s, 0) for s in statuses]
-    colors = [STEEL, AMBER, GREEN]
+    colors = [STEEL, AMBER, GREEN, NAVY, "#8B5CF6"]
 
     fig, ax = _make_figure()
     if chart_type == "Pie":
@@ -707,7 +741,7 @@ def _render_cases_by_type(chart_type, cases, _d2, _d3):
     values = list(counts.values())
 
     if chart_type == "Bar":
-        bars = ax.bar(labels, values, color=colors_l[:len(labels)], edgecolor="none")
+        bars = ax.bar(labels, values, color=[colors_l[i % len(colors_l)] for i in range(len(labels))], edgecolor="none")
         for bar, val in zip(bars, values):
             if val > 0:
                 ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.2,
@@ -716,7 +750,8 @@ def _render_cases_by_type(chart_type, cases, _d2, _d3):
         ax.spines["right"].set_visible(False)
     else:
         wedges, texts, autotexts = ax.pie(
-            values, labels=labels, autopct="%1.1f%%", colors=colors_l[:len(labels)],
+            values, labels=labels, autopct="%1.1f%%",
+            colors=[colors_l[i % len(colors_l)] for i in range(len(labels))],
             startangle=140, textprops={"fontsize": 10, "color": TEXT_DARK},
         )
         for at in autotexts:
