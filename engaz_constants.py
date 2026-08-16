@@ -40,6 +40,7 @@ NOTIFICATION_PAGE = {
     "invoice_paid": PAGE_INVOICES,
     "invoice_overdue": PAGE_INVOICES,
     "message_received": PAGE_MESSAGES,
+    "overdue_message_reply": PAGE_MESSAGES,
     "case_created": PAGE_CASES,
     "case_attachment_added": PAGE_CASES,
 }

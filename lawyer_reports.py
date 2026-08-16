@@ -12,11 +12,12 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle,
     PageBreak,
 )
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -51,6 +52,44 @@ DEFAULT_CHARTS = {
     "appointments": "Bar",
     "trends": "Line",
 }
+
+_DEJAVU_SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+_DEJAVU_SANS_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+try:
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    if os.path.exists(_DEJAVU_SANS):
+        pdfmetrics.registerFont(TTFont("DejaVu", _DEJAVU_SANS))
+    if os.path.exists(_DEJAVU_SANS_BOLD):
+        pdfmetrics.registerFont(TTFont("DejaVu-Bold", _DEJAVU_SANS_BOLD))
+except Exception:
+    pass
+
+
+class NumberedCanvas(rl_canvas.Canvas):
+    """Canvas callback that draws a running header and dynamic page numbers."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        num_pages = len(self._saved_page_states)
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self._draw_page_number(num_pages)
+            super().showPage()
+        super().save()
+
+    def _draw_page_number(self, page_count):
+        self.setFont("Helvetica", 8)
+        self.setFillColor(rl_colors.HexColor(TEXT_GRAY))
+        self.drawString(28, 18, "Confidential — Engaz Legal Practice")
+        self.drawRightString(A4[0] - 28, 18, f"Page {self._pageNumber} of {page_count}")
 
 
 def _parse_date(date_str):
@@ -114,6 +153,16 @@ def _filter_appointments(appts, date_from, date_to):
             filtered.append(a)
         result = filtered
     return result
+
+
+def _meta_label_style(color):
+    return ParagraphStyle("MetaLabel", fontName="DejaVu", fontSize=9,
+                          textColor=color, leading=12)
+
+
+def _meta_value_style(color):
+    return ParagraphStyle("MetaValue", fontName="DejaVu", fontSize=9,
+                          textColor=color, leading=12)
 
 
 class StatCardWidget(QFrame):
@@ -314,13 +363,6 @@ class LawyerReportsPage(QWidget):
         bar_layout.addWidget(self._type_combo)
 
         bar_layout.addStretch()
-
-        cases_pdf_btn = QPushButton("Export Cases")
-        cases_pdf_btn.setStyleSheet(f"QPushButton {{ background: {STEEL}; color: {WHITE}; border: none;"
-                                    f" border-radius: 4px; padding: 6px 12px; font-size: 11px; font-weight: bold; }}"
-                                    f"QPushButton:hover {{ background: {NAVY}; }}")
-        cases_pdf_btn.clicked.connect(self._export_cases_pdf)
-        bar_layout.addWidget(cases_pdf_btn)
 
         pdf_btn = QPushButton("Export Stats")
         pdf_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none;"
@@ -585,105 +627,178 @@ class LawyerReportsPage(QWidget):
         )
         if not path:
             return
-        doc = SimpleDocTemplate(path, pagesize=A4,
-                                leftMargin=36, rightMargin=36,
-                                topMargin=36, bottomMargin=36)
+
+        navy = rl_colors.HexColor("#1B3A5C")
+        steel = rl_colors.HexColor("#3A6B88")
+        warm_gray = rl_colors.HexColor("#E2E8F0")
+        charcoal = rl_colors.HexColor("#1E293B")
+        light_slate = rl_colors.HexColor("#F8F9FB")
+
+        margin = 28
+        doc = SimpleDocTemplate(
+            path, pagesize=A4,
+            leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
+        )
         styles = getSampleStyleSheet()
+        title_style = styles["Title"]
+        title_style.fontName = "DejaVu-Bold"
+        title_style.textColor = rl_colors.white
+        title_style.fontSize = 16
+        title_style.leading = 20
+
+        subtitle_style = styles["Normal"]
+        subtitle_style.fontName = "DejaVu"
+        subtitle_style.textColor = rl_colors.white
+        subtitle_style.fontSize = 9
+
+        section_style = styles["Heading2"]
+        section_style.fontName = "DejaVu-Bold"
+        section_style.textColor = navy
+        section_style.fontSize = 12
+
+        figure_style = styles["Heading3"]
+        figure_style.fontName = "DejaVu-Bold"
+        figure_style.textColor = navy
+        figure_style.fontSize = 11
+
         elements = []
 
-        elements.append(Paragraph("Engaz — Lawyer Report", styles["Title"]))
-        elements.append(Spacer(1, 12))
-        period = self._range_combo.currentText()
-        elements.append(Paragraph(f"Period: {period}", styles["Normal"]))
-        elements.append(Spacer(1, 12))
-
-        stat_data = [["Metric", "Value"]]
-        for _card, title, value in self._stat_cards:
-            stat_data.append([title, str(value)])
-        table = Table(stat_data, colWidths=[3 * inch, 2 * inch])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor(NAVY)),
-            ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 10),
-            ("GRID", (0, 0), (-1, -1), 0.5, rl_colors.HexColor(BORDER)),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        # ── Branded header banner ────────────────────────────────────────
+        now = datetime.now()
+        ref_id = f"ENG-{now.strftime('%Y%m%d%H%M%S')}"
+        banner_cells = [
+            [Paragraph("⚖️ ENGAZ LEGAL PRACTICE — LAWYER PERFORMANCE REPORT", title_style)],
+            [Paragraph(f"Generated {now.strftime('%Y-%m-%d %H:%M')}  ·  Reference ID: {ref_id}", subtitle_style)],
+        ]
+        banner = Table(banner_cells, colWidths=[A4[0] - 2 * margin])
+        banner.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), navy),
+            ("LEFTPADDING", (0, 0), (-1, -1), 16),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+            ("TOPPADDING", (0, 0), (0, 0), 16),
+            ("BOTTOMPADDING", (0, 0), (0, 0), 2),
+            ("TOPPADDING", (0, 1), (0, 1), 2),
+            ("BOTTOMPADDING", (0, 1), (0, 1), 16),
         ]))
-        elements.append(table)
+        elements.append(banner)
         elements.append(Spacer(1, 16))
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            for metric_key, fig in self._chart_figures.items():
-                png_path = os.path.join(tmpdir, f"{metric_key}.png")
-                fig.savefig(png_path, dpi=120, bbox_inches="tight",
-                           facecolor=WHITE, edgecolor="none")
-                img = Image(png_path, width=6.5 * inch, height=2.8 * inch)
-                elements.append(img)
-                elements.append(Spacer(1, 10))
-            elements.append(Spacer(1, 8))
-            elements.append(Paragraph(
-                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-                styles["Italic"],
-            ))
-            doc.build(elements)
-
-    def _export_cases_pdf(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export All Cases PDF", "all_cases.pdf", "PDF Files (*.pdf)"
-        )
-        if not path:
-            return
+        # ── Lawyer metadata & scope card ─────────────────────────────────
         uid = self._user["user_id"]
-        all_cases = self._filtered_cases if self._filtered_cases is not None else self._repo.get_cases_for_lawyer(uid)
-        doc = SimpleDocTemplate(path, pagesize=landscape(A4),
-                                leftMargin=24, rightMargin=24,
-                                topMargin=24, bottomMargin=24)
-        styles = getSampleStyleSheet()
-        elements = []
-        elements.append(Paragraph("Engaz — All Cases", styles["Title"]))
-        elements.append(Spacer(1, 8))
-        elements.append(Paragraph(
-            f"Lawyer: {self._user['first_name']} {self._user['last_name']}",
-            styles["Normal"],
-        ))
-        elements.append(Paragraph(
-            f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  "
-            f"Total cases: {len(all_cases)}",
-            styles["Normal"],
-        ))
-        elements.append(Spacer(1, 12))
+        cases = self._filtered_cases or []
+        won = sum(1 for c in cases if c.get("status") == "Won")
+        lost = sum(1 for c in cases if c.get("status") == "Lost")
+        decided = won + lost
+        win_rate = f"{(won / decided * 100):.1f}%" if decided else "—"
 
-        data = [["Case #", "Title", "Type", "Status", "Client", "Date"]]
-        for case in all_cases:
-            client = self._repo.get_user(case.get("client_id", ""))
-            client_name = f"{client['first_name']} {client['last_name']}" if client else "—"
-            data.append([
-                case.get("case_number", ""),
-                case.get("title", ""),
-                case.get("case_type", ""),
-                case.get("status", ""),
-                client_name,
-                (case.get("created_at", "")[:10]) if case.get("created_at") else "",
+        period = self._range_combo.currentText()
+        if period == "Custom":
+            date_range = f"{self._from_date.date().toString('yyyy-MM-dd')} → {self._to_date.date().toString('yyyy-MM-dd')}"
+        else:
+            date_range = period
+
+        elements.append(Paragraph("Lawyer Profile & Scope", section_style))
+        elements.append(Spacer(1, 6))
+        meta_rows = [
+            ["Lawyer Name", f"{self._user['first_name']} {self._user['last_name']}"],
+            ["Email", self._user.get("email", "—")],
+            ["Reporting Period", date_range],
+            ["Total Cases Handled", f"{len(cases)}"],
+            ["Win Rate", win_rate],
+        ]
+        meta_data = []
+        for label, value in meta_rows:
+            meta_data.append([
+                Paragraph(f"<b>{label}</b>", _meta_label_style(navy)),
+                Paragraph(value, _meta_value_style(charcoal)),
             ])
-        col_widths = [1.0 * inch, 3.5 * inch, 1.2 * inch, 1.2 * inch, 2.0 * inch, 1.2 * inch]
-        table = Table(data, colWidths=col_widths, repeatRows=1)
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor(NAVY)),
-            ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("GRID", (0, 0), (-1, -1), 0.5, rl_colors.HexColor(BORDER)),
+        meta_table = Table(meta_data, colWidths=[2.2 * inch, 3.6 * inch])
+        meta_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), light_slate),
+            ("BOX", (0, 0), (-1, -1), 0.5, warm_gray),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, warm_gray),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#F8F9FB")]),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
-        elements.append(table)
-        doc.build(elements)
+        elements.append(meta_table)
+        elements.append(Spacer(1, 16))
+
+        # ── KPI summary metric grid ──────────────────────────────────────
+        invoices = _filter_invoices(
+            self._repo.get_invoices_for_lawyer(uid), self._date_from, self._date_to
+        )
+        revenue = sum(inv.get("amount_paid", 0.0) for inv in invoices)
+        appts = _filter_appointments(
+            self._repo.get_appointments_for_lawyer(uid), self._date_from, self._date_to
+        )
+
+        closed_count = sum(1 for c in cases if c.get("status") in ("Closed", "Won", "Lost"))
+        closing_rate = f"{(closed_count / len(cases) * 100):.1f}%" if cases else "—"
+
+        closed_dates = [
+            (_parse_date(c.get("updated_at", c.get("created_at", ""))),
+             _parse_date(c.get("created_at", "")))
+            for c in cases if c.get("status") in ("Closed", "Won", "Lost")
+        ]
+        avg_pairs = [(end - start).days for end, start in closed_dates if end and start]
+        avg_to_close = f"{sum(avg_pairs) / len(avg_pairs):.0f} days" if avg_pairs else "—"
+
+        kpis = [
+            ("Total Cases Handled", f"{len(cases)}"),
+            ("Win Rate", win_rate),
+            ("Closing Rate", closing_rate),
+            ("Revenue Collected", f"${revenue:,.2f}"),
+            ("Appointments", f"{len(appts)}"),
+            ("Avg Time to Close", avg_to_close),
+        ]
+
+        elements.append(Paragraph("Key Performance Indicators", section_style))
+        elements.append(Spacer(1, 6))
+        kpi_data = [["Metric", "Value"]]
+        for label, value in kpis:
+            kpi_data.append([Paragraph(f"<b>{label}</b>", _meta_label_style(charcoal)),
+                             Paragraph(value, _meta_value_style(navy))])
+        kpi_table = Table(kpi_data, colWidths=[3.2 * inch, 2.6 * inch])
+        kpi_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), navy),
+            ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "DejaVu-Bold"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [light_slate, rl_colors.white]),
+            ("GRID", (0, 0), (-1, -1), 0.5, warm_gray),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        elements.append(kpi_table)
+        elements.append(Spacer(1, 16))
+
+        # ── High-resolution chart embeds ─────────────────────────────────
+        figure_titles = {
+            "trends": "Figure 1: Monthly Case Volume & Closure Velocity",
+            "cases_by_status": "Figure 2: Case Distribution by Status",
+            "cases_by_type": "Figure 3: Case Distribution by Practice Area",
+            "appointments": "Figure 4: Workload & Appointment Distribution",
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fig_num = 0
+            for metric_key in ("trends", "cases_by_status", "cases_by_type", "appointments"):
+                fig = self._chart_figures.get(metric_key)
+                if fig is None:
+                    continue
+                fig_num += 1
+                fig.set_facecolor(WHITE)
+                png_path = os.path.join(tmpdir, f"{metric_key}.png")
+                fig.savefig(png_path, dpi=220, bbox_inches="tight",
+                            facecolor=WHITE, edgecolor="none")
+                elements.append(Paragraph(
+                    figure_titles.get(metric_key, f"Figure {fig_num}"), figure_style
+                ))
+                elements.append(Spacer(1, 4))
+                elements.append(Image(png_path, width=6.2 * inch, height=2.7 * inch))
+                elements.append(Spacer(1, 14))
+
+            doc.build(elements, canvasmaker=NumberedCanvas)
 
 
 # ── Chart rendering functions (chart_type, data1, data2, data3) ──────

@@ -355,6 +355,8 @@ class MessageThreadWidget(QWidget):
             "notification_type": "message_received",
             "reference_id": msg["message_id"],
         })
+        if self._user["role"] == "lawyer":
+            self._repo.mark_overdue_notifications_read(self._user["user_id"], self._partner_id)
         self._refresh_messages()
         self.message_sent.emit(self._partner_id, self._partner_name, content)
 
@@ -398,6 +400,8 @@ class ConversationListWidget(QWidget):
 
     def refresh(self):
         clear_layout(self._list_layout)
+        if self._is_lawyer:
+            self._repo.ensure_overdue_reply_notifications(self._user["user_id"])
         conversations = self._repo.get_conversations_for_user(self._user["user_id"])
         if self._is_lawyer:
             overdue = self._repo.get_overdue_reply_threads(self._user["user_id"])
@@ -580,6 +584,13 @@ class MessagingPage(QWidget):
     def _on_conversation_selected(self, partner_id, partner_name, case_id):
         self._thread.load_conversation(partner_id, partner_name, case_id)
         self._conv_list.refresh()
+
+    def open_conversation_with(self, partner_id):
+        if not partner_id:
+            return
+        partner = self._repo.get_user(partner_id)
+        pname = f"{partner['first_name']} {partner['last_name']}" if partner else "Unknown"
+        self._on_conversation_selected(partner_id, pname, "")
 
     def _on_message_sent(self, partner_id, partner_name, content):
         self._conv_list.refresh()

@@ -420,6 +420,10 @@ class DataRepository:
                 if a[key] == user_id and a["date"] == date_str]
 
     def create_appointment(self, data):
+        if self.client_has_approved_appointment_on_date(
+            data.get("client_id", ""), data.get("lawyer_id", ""), data["date"]
+        ):
+            return None
         entry = {
             "appointment_id": self._next_id("appointments", "app"),
             "client_id": data["client_id"],
@@ -433,6 +437,8 @@ class DataRepository:
             "is_first_meeting": data.get("is_first_meeting", False),
             "status": data.get("status", "Requested"),
             "notes": data.get("notes", ""),
+            "rescheduled": data.get("rescheduled", False),
+            "original_appointment_id": data.get("original_appointment_id", ""),
         }
         self._data["appointments"].append(entry)
         self._save()
@@ -444,6 +450,15 @@ class DataRepository:
                 if a["status"] not in ("Declined", "Cancelled", "No Show"):
                     return True
         return False
+
+    def client_has_approved_appointment_on_date(self, client_id, lawyer_id, date_str):
+        return any(
+            a["client_id"] == client_id
+            and a["lawyer_id"] == lawyer_id
+            and a["date"] == date_str
+            and a["status"] == "Approved"
+            for a in self._data["appointments"]
+        )
 
     def update_appointment(self, appointment_id, **updates):
         for i, a in enumerate(self._data["appointments"]):
@@ -609,6 +624,31 @@ class DataRepository:
                   if inv["client_id"] == client_id and inv["status"] != "Paid"]
         return result, sum(inv["amount"] for inv in result)
 
+    def apply_payment(self, selected_ids, pay_amount):
+        remaining = pay_amount
+        for inv_id in selected_ids:
+            inv = self.get_invoice(inv_id)
+            if not inv:
+                continue
+            balance = inv["amount"] - inv.get("amount_paid", 0.0)
+            if balance <= 0:
+                continue
+            apply_amount = min(remaining, balance)
+            new_paid = inv.get("amount_paid", 0.0) + apply_amount
+            if new_paid >= inv["amount"]:
+                self.update_invoice(inv_id, amount_paid=inv["amount"], status="Paid")
+            else:
+                self.update_invoice(inv_id, amount_paid=new_paid, status="Partially Paid")
+            self.create_notification({
+                "user_id": inv["lawyer_id"],
+                "title": "Invoice Payment Received",
+                "message": f"Payment of ${apply_amount:,.2f} received for invoice {inv['invoice_number']}.",
+                "notification_type": "invoice_paid",
+                "reference_id": inv_id,
+            })
+            remaining -= apply_amount
+        return pay_amount - remaining
+
     # ── Notification methods ─────────────────────────────────────────────
 
     def notifications_for_user(self, user_id):
@@ -748,6 +788,41 @@ class DataRepository:
                     "last_at": info["last_at"],
                 })
         return overdue
+
+    def ensure_overdue_reply_notifications(self, lawyer_id):
+        created = 0
+        for thread in self.get_overdue_reply_threads(lawyer_id):
+            partner_id = thread["partner_id"]
+            existing = any(
+                n["user_id"] == lawyer_id
+                and n["notification_type"] == "overdue_message_reply"
+                and n["reference_id"] == partner_id
+                and not n["is_read"]
+                for n in self._data["notifications"]
+            )
+            if existing:
+                continue
+            self.create_notification({
+                "user_id": lawyer_id,
+                "title": "Overdue Client Message",
+                "message": f"You have not replied to {thread['client_name']}'s message for over 2 days.",
+                "notification_type": "overdue_message_reply",
+                "reference_id": partner_id,
+            })
+            created += 1
+        return created
+
+    def mark_overdue_notifications_read(self, user_id, partner_id):
+        changed = False
+        for n in self._data["notifications"]:
+            if (n["user_id"] == user_id
+                    and n["notification_type"] == "overdue_message_reply"
+                    and n["reference_id"] == partner_id
+                    and not n["is_read"]):
+                n["is_read"] = True
+                changed = True
+        if changed:
+            self._save()
 
     # ── Case file methods ────────────────────────────────────────────────
 
@@ -1745,6 +1820,7 @@ class DashboardPage(QWidget):
     def refresh(self):
         uid = self._user["user_id"]
         if self._user["role"] == "lawyer":
+            self._repo.ensure_overdue_reply_notifications(uid)
             vals = [
                 f"${self._repo.total_money_made(uid):,.2f}",
                 self._repo.count_active_cases_for_lawyer(uid),
@@ -2203,8 +2279,7 @@ class Casepagemain(QWidget):
         layout.addWidget(heading)
         layout.addSpacing(12)
 
-        if self._is_lawyer:
-            self._build_toolbar(layout)
+        self._build_toolbar(layout)
 
         self._build_table(layout)
 
@@ -2213,32 +2288,45 @@ class Casepagemain(QWidget):
         bar.setSpacing(8)
 
         self._search = QLineEdit()
-        self._search.setPlaceholderText("Search by title...")
-        self._search.setStyleSheet(f"padding: 6px 10px; border: 1px solid {BORDER}; border-radius: 4px;"
+        self._search.setPlaceholderText("Search case #, title, or name...")
+        self._search.setMinimumWidth(200)
+        self._search.setMaximumWidth(400)
+        self._search.setFixedHeight(36)
+        self._search.setStyleSheet(f"padding: 0 12px; border: 1px solid {BORDER}; border-radius: 6px;"
                                    f" font-size: 13px; color: {TEXT_DARK}; background: {WHITE};")
         self._search.textChanged.connect(self._on_filter_changed)
         bar.addWidget(self._search)
 
         self._status_filter = ArrowComboBox(placeholder="All Status")
         self._status_filter.addItems(["All Status", "Open", "In Progress", "On Hold", "Closed", "Won", "Lost"])
+        self._status_filter.setCurrentIndex(0)
         self._status_filter.setStyleSheet(GLOBAL_QSS)
         self._status_filter.currentTextChanged.connect(self._on_filter_changed)
         bar.addWidget(self._status_filter)
 
         self._type_filter = ArrowComboBox(placeholder="All Types")
         self._type_filter.addItems(["All Types", "criminal", "civil", "corporate", "family"])
+        self._type_filter.setCurrentIndex(0)
         self._type_filter.setStyleSheet(GLOBAL_QSS)
         self._type_filter.currentTextChanged.connect(self._on_filter_changed)
         bar.addWidget(self._type_filter)
 
         bar.addStretch()
 
-        new_btn = QPushButton("+ New Case")
-        new_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none; border-radius: 4px;"
-                              f" padding: 8px 18px; font-size: 13px; font-weight: bold; }}"
-                              f"QPushButton:hover {{ background: {STEEL}; }}")
-        new_btn.clicked.connect(self._open_create_dialog)
-        bar.addWidget(new_btn)
+        if self._is_lawyer:
+            export_btn = QPushButton("Export Cases")
+            export_btn.setStyleSheet(f"QPushButton {{ background: {STEEL}; color: {WHITE}; border: none; border-radius: 4px;"
+                                     f" padding: 8px 18px; font-size: 13px; font-weight: bold; }}"
+                                     f"QPushButton:hover {{ background: {NAVY}; }}")
+            export_btn.clicked.connect(self._export_cases_pdf)
+            bar.addWidget(export_btn)
+
+            new_btn = QPushButton("+ New Case")
+            new_btn.setStyleSheet(f"QPushButton {{ background: {NAVY}; color: {WHITE}; border: none; border-radius: 4px;"
+                                  f" padding: 8px 18px; font-size: 13px; font-weight: bold; }}"
+                                  f"QPushButton:hover {{ background: {STEEL}; }}")
+            new_btn.clicked.connect(self._open_create_dialog)
+            bar.addWidget(new_btn)
 
         layout.addLayout(bar)
         layout.addSpacing(12)
@@ -2310,28 +2398,106 @@ class Casepagemain(QWidget):
 
     def _update_empty_state(self):
         if not self._is_lawyer:
-            has_cases = self._table.rowCount() > 0
-            self._table.setVisible(has_cases)
-            self._empty_state.setVisible(not has_cases)
+            total_cases = len(self._repo.get_cases_for_client(self._user["user_id"]))
+            if total_cases == 0:
+                self._table.setVisible(False)
+                self._empty_state.setVisible(True)
+            else:
+                self._table.setVisible(True)
+                self._empty_state.setVisible(False)
 
     def _filtered_cases(self):
         cases = (self._repo.get_cases_for_lawyer(self._user["user_id"])
                  if self._is_lawyer
                  else self._repo.get_cases_for_client(self._user["user_id"]))
-        search = self._search.text().strip().lower() if self._is_lawyer else ""
+        search = self._search.text().strip().lower()
         if search:
-            cases = [c for c in cases if search in c["title"].lower()]
-        if self._filter_status != "All Status" and self._filter_status != "All":
+            matched = []
+            for c in cases:
+                haystack = [c["case_number"].lower(), c["title"].lower()]
+                person_id = c["client_id"] if self._is_lawyer else c["lawyer_id"]
+                person = self._repo.get_user(person_id)
+                if person:
+                    name = _client_display_name(person) if self._is_lawyer else f"{person['first_name']} {person['last_name']}"
+                    haystack.append(name.lower())
+                    haystack.append(f"{person.get('first_name', '')} {person.get('last_name', '')}".lower())
+                if any(search in h for h in haystack):
+                    matched.append(c)
+            cases = matched
+        if self._filter_status not in ("", "All", "All Status"):
             cases = [c for c in cases if c["status"] == self._filter_status]
-        if self._filter_type != "All Types" and self._filter_type != "All":
+        if self._filter_type not in ("", "All", "All Types"):
             cases = [c for c in cases if c["case_type"] == self._filter_type]
         return cases
 
     def _on_filter_changed(self):
-        if self._is_lawyer:
-            self._filter_status = self._status_filter.currentText()
-            self._filter_type = self._type_filter.currentText()
+        self._filter_status = self._status_filter.currentText()
+        self._filter_type = self._type_filter.currentText()
         self._load_table()
+
+    def _export_cases_pdf(self):
+        from PySide6.QtWidgets import QFileDialog as QFD
+        cases = self._repo.get_cases_for_lawyer(self._user["user_id"])
+        if not cases:
+            QMessageBox.information(self, "No Cases", "No cases to export.")
+            return
+        path, _ = QFD.getSaveFileName(self, "Export All Cases PDF", "all_cases.pdf", "PDF Files (*.pdf)")
+        if not path:
+            return
+        try:
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.lib import colors as rl_colors
+            from reportlab.lib.units import inch
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.styles import getSampleStyleSheet
+
+            doc = SimpleDocTemplate(path, pagesize=landscape(A4),
+                                    leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
+            styles = getSampleStyleSheet()
+            elements = []
+            elements.append(Paragraph("Engaz — All Cases", styles["Title"]))
+            elements.append(Spacer(1, 8))
+            elements.append(Paragraph(
+                f"Lawyer: {self._user['first_name']} {self._user['last_name']}", styles["Normal"],
+            ))
+            elements.append(Paragraph(
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Total cases: {len(cases)}",
+                styles["Normal"],
+            ))
+            elements.append(Spacer(1, 12))
+
+            data = [["Case #", "Title", "Type", "Status", "Client", "Created Date"]]
+            for case in cases:
+                client = self._repo.get_user(case.get("client_id", ""))
+                client_name = _client_display_name(client)
+                data.append([
+                    case.get("case_number", ""),
+                    case.get("title", ""),
+                    case.get("case_type", ""),
+                    case.get("status", ""),
+                    client_name,
+                    (case.get("created_at", "")[:10]) if case.get("created_at") else "",
+                ])
+            col_widths = [1.0 * inch, 3.5 * inch, 1.2 * inch, 1.2 * inch, 2.0 * inch, 1.2 * inch]
+            table = Table(data, colWidths=col_widths, repeatRows=1)
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor(NAVY)),
+                ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("GRID", (0, 0), (-1, -1), 0.5, rl_colors.HexColor(BORDER)),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#F8F9FB")]),
+            ]))
+            elements.append(table)
+            doc.build(elements)
+            QMessageBox.information(self, "Export Successful", f"All cases exported to:\n{path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", str(e))
 
     def _on_row_double_clicked(self, row, _col):
         case_number = self._table.item(row, 0).text()
@@ -2727,6 +2893,15 @@ class AppointmentDialog(QDialog):
         lawyer_id = self._user["user_id"] if self._is_lawyer else (self._lawyer.currentData() if hasattr(self, "_lawyer") else None)
         if not lawyer_id:
             return
+        if not self._is_lawyer and self._repo.client_has_approved_appointment_on_date(
+            self._user["user_id"], lawyer_id, self._date_str
+        ):
+            self._conflict_warning.setText(
+                "You already have an appointment with the selected lawyer."
+            )
+            self._conflict_warning.setVisible(True)
+            self._save_btn.setEnabled(False)
+            return
         lawyer_conflict = self._repo.find_appointment_conflict({
             "lawyer_id": lawyer_id,
             "date": self._date_str,
@@ -2790,6 +2965,17 @@ class AppointmentDialog(QDialog):
             self._error.show_message("Please select a lawyer"); return
         if not self._time.currentText():
             self._error.show_message("Please select a time"); return
+        if not self._is_lawyer:
+            lawyer_id = self._lawyer.currentData()
+            if self._repo.client_has_approved_appointment_on_date(
+                self._user["user_id"], lawyer_id, self._date_str
+            ):
+                QMessageBox.warning(
+                    self,
+                    "Daily Appointment Limit",
+                    "You already have an appointment with the selected lawyer."
+                )
+                return
         self.accept()
 
     def appointment_data(self):
@@ -3175,6 +3361,15 @@ class CalendarPage(QWidget):
         data = dlg.appointment_data()
         data["client_id"] = self._user["user_id"]
         data["status"] = "Requested"
+        if self._repo.client_has_approved_appointment_on_date(
+            data["client_id"], data["lawyer_id"], data["date"]
+        ):
+            QMessageBox.warning(
+                self,
+                "Daily Appointment Limit",
+                "You already have an appointment with the selected lawyer."
+            )
+            return
         conflict = self._repo.find_appointment_conflict({
             "lawyer_id": data["lawyer_id"], "date": data["date"],
             "start_time": data["start_time"], "duration_minutes": data["duration_minutes"]
@@ -3185,6 +3380,13 @@ class CalendarPage(QWidget):
                 f"({conflict['date']} {conflict['start_time']}).")
             return
         appt = self._repo.create_appointment(data)
+        if appt is None:
+            QMessageBox.warning(
+                self,
+                "Daily Appointment Limit",
+                "You already have an appointment with the selected lawyer."
+            )
+            return
         self._repo.create_notification({
             "user_id": data["lawyer_id"],
             "title": "New Appointment Request",
@@ -3379,10 +3581,19 @@ class CalendarPage(QWidget):
             "meeting_type": appt.get("meeting_type", "consultation"),
             "notes": f"Rescheduled from {appt['date']} {appt['start_time']}.\n{appt.get('notes', '')}",
             "status": "Requested",
+            "rescheduled": True,
             "original_appointment_id": appt["appointment_id"],
             "case_id": appt.get("case_id", ""),
         }
         new_appt = self._repo.create_appointment(new_data)
+
+        if new_appt is None:
+            QMessageBox.warning(
+                self,
+                "Daily Appointment Limit",
+                "You already have an appointment with the selected lawyer."
+            )
+            return
 
         self._repo.update_appointment(appt["appointment_id"], rescheduled=True)
 
@@ -3616,10 +3827,11 @@ class InvoiceFormDialog(QDialog):
 
 
 class PaymentDialog(QDialog):
-    def __init__(self, repo, client_id, parent=None):
+    def __init__(self, repo, client_id, preselect_ids=None, parent=None):
         super().__init__(parent)
         self._repo = repo
         self._client_id = client_id
+        self._preselect_ids = preselect_ids or []
         self._selected_ids = []
         self.setWindowTitle("Pay Invoices")
         self.resize(500, 430)
@@ -3812,10 +4024,15 @@ class PaymentDialog(QDialog):
             cb = QCheckBox(label)
             cb.setStyleSheet(f"font-size: 12px; color: {TEXT_DARK}; border: 1px solid {BORDER}; border-radius: 4px; padding: 6px;")
             cb.toggled.connect(self._update_total)
+            if inv["invoice_id"] in self._preselect_ids:
+                cb.setChecked(True)
             self._check_layout.insertWidget(self._check_layout.count() - 1, cb)
             self._checks.append((cb, inv, remaining))
         self._check_layout.addStretch()
-        total_remaining = sum(rem for cb, inv, rem in self._checks)
+        if self._preselect_ids:
+            total_remaining = sum(rem for cb, inv, rem in self._checks if cb.isChecked())
+        else:
+            total_remaining = sum(rem for cb, inv, rem in self._checks)
         self._pay_amount.setText(f"{total_remaining:.2f}" if total_remaining > 0 else "")
         self._update_total()
 
@@ -3957,6 +4174,144 @@ def export_invoice_pdf(invoice, client, lawyer, case, output_path):
     doc.build(elements)
 
 
+class InvoiceDetailDialog(QDialog):
+    def __init__(self, repo, user, invoice, parent=None):
+        super().__init__(parent)
+        self._repo = repo
+        self._user = user
+        self._invoice = invoice
+        self._is_lawyer = user["role"] == "lawyer"
+        self.setWindowTitle(f"Invoice Details — {invoice['invoice_number']}")
+        self.resize(520, 560)
+        self._build()
+
+    def _build(self):
+        self.setStyleSheet(f"background: {WHITE};")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 20, 24, 16)
+        layout.setSpacing(10)
+
+        header = QHBoxLayout()
+        num = QLabel(self._invoice["invoice_number"])
+        num.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {NAVY}; border: none;")
+        header.addWidget(num)
+        header.addStretch()
+        header.addWidget(_status_badge(self._invoice["status"]))
+        layout.addLayout(header)
+
+        grid = QGridLayout()
+        grid.setVerticalSpacing(8)
+        grid.setHorizontalSpacing(12)
+        grid.setColumnStretch(1, 1)
+
+        client = self._repo.get_user(self._invoice.get("client_id", ""))
+        lawyer = self._repo.get_user(self._invoice.get("lawyer_id", ""))
+        client_name = _client_display_name(client)
+        lawyer_name = f"{lawyer['first_name']} {lawyer['last_name']}" if lawyer else "—"
+
+        case = self._repo.get_case(self._invoice.get("case_id", ""))
+        case_text = f"{case['case_number']} — {case['title']}" if case else "—"
+
+        rows = [
+            ("Due Date", self._invoice.get("due_date", "—")),
+            ("Issue Date", (self._invoice.get("created_at", "") or "")[:10]),
+            ("Client", client_name),
+            ("Lawyer", lawyer_name),
+            ("Case", case_text),
+        ]
+        for r, (label, value) in enumerate(rows):
+            lbl = QLabel(label)
+            lbl.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {NAVY}; border: none;")
+            val = QLabel(value)
+            val.setWordWrap(True)
+            val.setStyleSheet(f"font-size: 13px; color: {TEXT_DARK}; border: none;")
+            grid.addWidget(lbl, r, 0, Qt.AlignRight | Qt.AlignTop)
+            grid.addWidget(val, r, 1)
+        layout.addLayout(grid)
+
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet(f"background: {BORDER}; border: none;")
+        layout.addWidget(line)
+
+        summary_title = QLabel("Financial Summary")
+        summary_title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {TEXT_DARK}; border: none;")
+        layout.addWidget(summary_title)
+
+        self._total_lbl = QLabel()
+        self._paid_lbl = QLabel()
+        self._balance_lbl = QLabel()
+        for lbl in (self._total_lbl, self._paid_lbl, self._balance_lbl):
+            lbl.setStyleSheet(f"font-size: 13px; color: {TEXT_DARK}; border: none;")
+            layout.addWidget(lbl)
+
+        desc_title = QLabel("Description / Line Items")
+        desc_title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {TEXT_DARK}; border: none;")
+        layout.addWidget(desc_title)
+        desc = QLabel(self._invoice.get("description", "No description."))
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"font-size: 13px; color: {TEXT_DARK}; border: 1px solid {BORDER};"
+                           f" border-radius: 4px; padding: 10px; background: {CARD_BG};")
+        layout.addWidget(desc)
+
+        layout.addStretch()
+
+        btns = QHBoxLayout()
+        export_btn = QPushButton("Export PDF")
+        export_btn.setStyleSheet(BTN_SECONDARY_HOVER)
+        export_btn.clicked.connect(self._export_pdf)
+        btns.addWidget(export_btn)
+        self._pay_btn = QPushButton("Pay Balance")
+        self._pay_btn.setStyleSheet(BTN_PRIMARY_HOVER)
+        self._pay_btn.clicked.connect(self._pay_balance)
+        btns.addWidget(self._pay_btn)
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(BTN_SECONDARY_HOVER)
+        close_btn.clicked.connect(self.accept)
+        btns.addWidget(close_btn)
+        layout.addLayout(btns)
+
+        self._refresh_values()
+
+    def _refresh_values(self):
+        inv = self._invoice
+        amount = inv["amount"]
+        paid = inv.get("amount_paid", 0.0)
+        balance = amount - paid
+        self._total_lbl.setText(f"Total Amount: ${amount:,.2f}")
+        self._paid_lbl.setText(f"Amount Paid: ${paid:,.2f}")
+        self._balance_lbl.setText(f"Remaining Balance Due: ${balance:,.2f}")
+        self._pay_btn.setVisible((not self._is_lawyer) and balance > 0)
+
+    def _export_pdf(self):
+        from PySide6.QtWidgets import QFileDialog as QFD
+        path, _ = QFD.getSaveFileName(
+            self, "Export Invoice PDF", f"{self._invoice['invoice_number']}.pdf", "PDF Files (*.pdf)"
+        )
+        if not path:
+            return
+        client = self._repo.get_user(self._invoice.get("client_id", "")) or {}
+        lawyer = self._repo.get_user(self._invoice.get("lawyer_id", "")) or {}
+        case = self._repo.get_case(self._invoice.get("case_id", "")) or {}
+        try:
+            export_invoice_pdf(self._invoice, client, lawyer, case, path)
+            QMessageBox.information(self, "Export Successful", f"Invoice exported to:\n{path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Export Failed", str(e))
+
+    def _pay_balance(self):
+        dlg = PaymentDialog(
+            self._repo, self._user["user_id"],
+            preselect_ids=[self._invoice["invoice_id"]], parent=self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self._repo.apply_payment(dlg.selected_ids(), dlg.payment_amount())
+        QMessageBox.information(self, "Payment Successful", "Your payment has been processed successfully.")
+        self._invoice = self._repo.get_invoice(self._invoice["invoice_id"]) or self._invoice
+        self._refresh_values()
+
+
 class InvoicesPage(QWidget):
     def __init__(self, repo, user, parent=None):
         super().__init__(parent)
@@ -4012,6 +4367,7 @@ class InvoicesPage(QWidget):
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
         self._table.verticalHeader().setVisible(False)
+        self._table.cellDoubleClicked.connect(self._open_detail)
         h = self._table.horizontalHeader()
         h.setStretchLastSection(True)
         h.setSectionResizeMode(QHeaderView.Stretch)
@@ -4042,9 +4398,26 @@ class InvoicesPage(QWidget):
             else:
                 pn = "\u2014"
             self._table.setItem(row, 3, QTableWidgetItem(pn))
-            self._table.setItem(row, 4, QTableWidgetItem(f"${inv['amount']:,.2f}"))
+            if inv["status"] == "Partially Paid":
+                balance = inv["amount"] - inv.get("amount_paid", 0.0)
+                amount_text = f"${balance:,.2f}"
+            else:
+                amount_text = f"${inv['amount']:,.2f}"
+            self._table.setItem(row, 4, QTableWidgetItem(amount_text))
             self._table.setCellWidget(row, 5, _status_badge(inv["status"]))
             self._table.setItem(row, 6, QTableWidgetItem(inv.get("due_date", "")))
+
+    def _open_detail(self, row, _col):
+        invoice_number = self._table.item(row, 0).text()
+        invoices = (self._repo.get_invoices_for_lawyer(self._user["user_id"])
+                    if self._is_lawyer
+                    else self._repo.get_invoices_for_client(self._user["user_id"]))
+        inv = next((i for i in invoices if i["invoice_number"] == invoice_number), None)
+        if inv is None:
+            return
+        dlg = InvoiceDetailDialog(self._repo, self._user, inv, parent=self)
+        dlg.exec()
+        self._load_table()
 
     def _open_create(self):
         dlg = InvoiceFormDialog(self._repo, self._user, parent=self)
@@ -4072,28 +4445,7 @@ class InvoicesPage(QWidget):
             if not selected:
                 self._load_table()
                 return
-            remaining = pay_amount
-            for inv_id in selected:
-                inv = self._repo.get_invoice(inv_id)
-                if not inv:
-                    continue
-                balance = inv["amount"] - inv.get("amount_paid", 0.0)
-                if balance <= 0:
-                    continue
-                apply_amount = min(remaining, balance)
-                new_paid = inv.get("amount_paid", 0.0) + apply_amount
-                if new_paid >= inv["amount"]:
-                    self._repo.update_invoice(inv_id, amount_paid=inv["amount"], status="Paid")
-                else:
-                    self._repo.update_invoice(inv_id, amount_paid=new_paid, status="Partially Paid")
-                self._repo.create_notification({
-                    "user_id": inv["lawyer_id"],
-                    "title": "Invoice Payment Received",
-                    "message": f"Payment of ${apply_amount:,.2f} received for invoice {inv['invoice_number']}.",
-                    "notification_type": "invoice_paid",
-                    "reference_id": inv_id,
-                })
-                remaining -= apply_amount
+            self._repo.apply_payment(selected, pay_amount)
             QMessageBox.information(self, "Payment Successful",
                                     "Your payment has been processed successfully.")
         self._load_table()
@@ -4232,6 +4584,7 @@ class MainWindow(QWidget):
 
         self._header = HeaderBar(self._repo, self._user, self._navigate_to_page)
         self._header.sidebar_toggle_requested.connect(self._sidebar.toggle)
+        self._header.notification_clicked.connect(self._on_notification_clicked)
         main_area.addWidget(self._header)
 
         self._pages = QStackedWidget()
@@ -4250,13 +4603,16 @@ class MainWindow(QWidget):
             from messaging import MessagingPage
             messaging_page = MessagingPage(self._repo, self._user)
             messaging_page.case_link_clicked.connect(self._on_case_link_from_message)
+            self._messaging_page = messaging_page
             self._pages.addWidget(messaging_page)
             if self._user["role"] == "lawyer":
                 from lawyer_reports import LawyerReportsPage
                 self._pages.addWidget(LawyerReportsPage(self._repo, self._user))
                 from references import LawLibraryPage
                 self._pages.addWidget(LawLibraryPage(self._repo, self._user))
+                self._repo.ensure_overdue_reply_notifications(self._user["user_id"])
             else:
+                self._messaging_page = None
                 self._pages.addWidget(PlaceholderPage("Reports", "Reports are only available for lawyers."))
                 self._pages.addWidget(PlaceholderPage("References", "References are only available for lawyers."))
         main_area.addWidget(self._pages)
@@ -4294,6 +4650,13 @@ class MainWindow(QWidget):
             cases_page.navigate_to_case(case_id)
         self._header.refresh_badge()
         self._sidebar.select_page_by_page_number(PAGE_CASES)
+
+    def _on_notification_clicked(self, notif_type, notif):
+        if notif_type == "overdue_message_reply":
+            self._pages.setCurrentIndex(PAGE_MESSAGES)
+            messaging_page = self._pages.widget(PAGE_MESSAGES)
+            if messaging_page and hasattr(messaging_page, "open_conversation_with"):
+                messaging_page.open_conversation_with(notif.get("reference_id", ""))
 
     def _handle_reset(self):
         self._repo.reset_to_defaults()
